@@ -132,6 +132,7 @@ Go 生態**沒有** `python-crontab` 的等價物（`robfig/cron`、`mileusna/cr
 
   JSON 回應直接回傳 DTO、不另立 `Response` 型別。HTML 頁面的 template data 是例外，可在 controller 層定義 `XxxViewModel`（僅供 template 使用、不外流）。
 - **`interface` 只用於「行為契約」**：一律 `I` 前綴，**集中放在 `internal/domain/interface/`，一介面一檔**（如 `i_crontab_document_repository.go` 定義 `ICrontabDocumentRepository`）。**實例檔內不得宣告任何 `interface`。不使用「port」一詞或資料夾。**
+  - **資料夾叫 `interface`，但 package 宣告為 `interfaces`** —— `interface` 是 Go 保留字，不能當 package 名。因為兩者不一致，**import 時一律加明確別名**：`import interfaces "github.com/james-hsueh/crontab-watcher/internal/domain/interface"`。
 - **具體實作用「純角色名」**：不帶 `I`、也不帶技術前綴。例：`ICommandExecutionProxy` 的實作是 `CommandExecutionProxy`（**不是** `ShellCommandExecutionProxy`）；`IJobRunRepository` 的實作是 `JobRunRepository`（**不是** `JsonlJobRunRepository`）。
 - **檔名必須對齊其主要型別／符號**（一律小寫 snake_case）：介面檔 `i_` 前綴一檔一介面；實作檔用純角色名；mock 檔 `mock_i_xxx.go`（mockery 產生）。
 - **禁用空介面 `any`（`interface{}`）作為資料多型手段。** 需要多型時用具名 `interface`。允許的例外：`html/template` 的 template data 參數、JSON marshal 邊界。

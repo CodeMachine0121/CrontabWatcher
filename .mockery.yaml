@@ -1,0 +1,9 @@
+with-expecter: true
+dir: internal/domain/interface/mocks
+outpkg: mocks
+mockname: "Mock{{.InterfaceName}}"
+filename: "mock_{{.InterfaceNameSnake}}.go"
+packages:
+  github.com/james-hsueh/crontab-watcher/internal/domain/interface:
+    config:
+      all: true
