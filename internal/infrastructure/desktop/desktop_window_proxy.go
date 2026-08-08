@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 	"sync"
 )
 
@@ -19,7 +18,6 @@ import (
 // 實作：不必問視窗在不在，寫進去就是了。
 type DesktopWindowProxy struct {
 	executablePath string
-	activatorPath  string
 
 	mutex   sync.Mutex
 	command *exec.Cmd
@@ -29,10 +27,11 @@ type DesktopWindowProxy struct {
 
 // NewDesktopWindowProxy 建立 proxy。
 //
-// activatorPath 指向 osascript，用來把已經開著的視窗帶到最前。留空即不嘗試——
-// 這一步是錦上添花，失敗不影響「網址已經被載入」這件事。
-func NewDesktopWindowProxy(executablePath string, activatorPath string) *DesktopWindowProxy {
-	return &DesktopWindowProxy{executablePath: executablePath, activatorPath: activatorPath}
+// 「把視窗帶到最前」刻意不在這裡：視窗子程序收到新網址時會自己跳到前面。由它
+// 自己來不需要任何系統權限，由外面來則需要輔助使用權限、而且拿不到時只能安靜
+// 地失敗。
+func NewDesktopWindowProxy(executablePath string) *DesktopWindowProxy {
+	return &DesktopWindowProxy{executablePath: executablePath}
 }
 
 // Open 讓 targetURL 出現在完整視窗裡。
@@ -48,8 +47,6 @@ func (proxy *DesktopWindowProxy) Open(targetURL string) error {
 
 			return proxy.start(targetURL)
 		}
-
-		proxy.bringToFront()
 
 		return nil
 	}
@@ -126,20 +123,4 @@ func (proxy *DesktopWindowProxy) terminate() {
 	proxy.command = nil
 	proxy.input = nil
 	proxy.exited = nil
-}
-
-// bringToFront 嘗試把已經開著的視窗帶到最前。
-//
-// 刻意忽略失敗：這需要輔助使用權限，而拿不到權限時該發生的事是「視窗載入了新
-// 網址但沒有跳到前面」，不是「開啟失敗」。
-func (proxy *DesktopWindowProxy) bringToFront() {
-	if strings.TrimSpace(proxy.activatorPath) == "" || proxy.command == nil || proxy.command.Process == nil {
-		return
-	}
-
-	script := fmt.Sprintf(
-		"tell application \"System Events\" to set frontmost of (first process whose unix id is %d) to true",
-		proxy.command.Process.Pid)
-
-	_ = exec.Command(proxy.activatorPath, "-e", script).Run()
 }

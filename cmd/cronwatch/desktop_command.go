@@ -11,7 +11,6 @@ import (
 
 	"github.com/james-hsueh/crontab-watcher/internal/controller"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/desktop"
-	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/notification"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/system"
 )
 
@@ -90,7 +89,7 @@ func runDesktopCommand() int {
 	log.Printf("refreshing every %s; closing cronwatch does not stop any job",
 		configuration.DesktopRefreshInterval)
 
-	windowProxy := desktop.NewDesktopWindowProxy(resolveOwnExecutablePath(), notification.DefaultOsascriptPath)
+	windowProxy := desktop.NewDesktopWindowProxy(resolveOwnExecutablePath())
 	defer windowProxy.Close()
 
 	menuBarController := controller.NewMenuBarController(

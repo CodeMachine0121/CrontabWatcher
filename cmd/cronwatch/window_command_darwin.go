@@ -2,6 +2,30 @@
 
 package main
 
+/*
+#cgo CFLAGS: -x objective-c
+#cgo LDFLAGS: -framework Cocoa
+#import <Cocoa/Cocoa.h>
+
+// cronwatchBecomeForegroundWindow 讓視窗子程序成為一個正常的前景 app。
+//
+// 為什麼必須自己來：整個 app bundle 標了 LSUIElement（選單列 app 不該佔一個
+// Dock 圖示），而子程序用的是同一份 Info.plist，於是它預設也是 accessory ——
+// accessory 的視窗開起來會躲在別人後面、拿不到鍵盤焦點，而這個視窗裡有要填的
+// 表單。webview 只在「沒有被包成 bundle」時才自己處理這件事，包起來之後就得由
+// 我們宣告。
+//
+// 這也是「視窗已經開著時把它帶到最前」的實作。先前的做法是叫 osascript 去操作
+// System Events，那需要輔助使用權限，拿不到就只能安靜地失敗。這裡是程序對自己
+// 說話，不需要任何權限。
+static void cronwatchBecomeForegroundWindow(void) {
+    [NSApplication sharedApplication];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    [NSApp activateIgnoringOtherApps:YES];
+}
+*/
+import "C"
+
 import (
 	"bufio"
 	"fmt"
@@ -44,6 +68,8 @@ func runWindowCommand(arguments []string) int {
 
 		return usageExitCode
 	}
+
+	C.cronwatchBecomeForegroundWindow()
 
 	window := webview.New(false)
 	defer window.Destroy()
@@ -89,7 +115,10 @@ func followNavigationRequests(window webview.WebView, input io.Reader) {
 			continue
 		}
 
-		window.Dispatch(func() { window.Navigate(targetURL) })
+		window.Dispatch(func() {
+			window.Navigate(targetURL)
+			C.cronwatchBecomeForegroundWindow()
+		})
 	}
 
 	window.Terminate()

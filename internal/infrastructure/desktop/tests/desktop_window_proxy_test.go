@@ -52,7 +52,7 @@ func eventuallyRecorded(t *testing.T, recordPath string, expectedLines int) []st
 func TestDesktopWindowProxyStartsTheWindowWithTheRequestedAddress(t *testing.T) {
 	executablePath, recordPath := writeFakeWindowBinary(t)
 
-	proxy := desktop.NewDesktopWindowProxy(executablePath, "")
+	proxy := desktop.NewDesktopWindowProxy(executablePath)
 	t.Cleanup(proxy.Close)
 
 	require.NoError(t, proxy.Open("http://127.0.0.1:51234/jobs/job-1/detail"))
@@ -66,7 +66,7 @@ func TestDesktopWindowProxyStartsTheWindowWithTheRequestedAddress(t *testing.T) 
 func TestDesktopWindowProxyReusesAWindowThatIsAlreadyOpen(t *testing.T) {
 	executablePath, recordPath := writeFakeWindowBinary(t)
 
-	proxy := desktop.NewDesktopWindowProxy(executablePath, "")
+	proxy := desktop.NewDesktopWindowProxy(executablePath)
 	t.Cleanup(proxy.Close)
 
 	require.NoError(t, proxy.Open("http://127.0.0.1:51234/"))
@@ -85,7 +85,7 @@ func TestDesktopWindowProxyReusesAWindowThatIsAlreadyOpen(t *testing.T) {
 func TestDesktopWindowProxyStartsAgainAfterTheWindowIsGone(t *testing.T) {
 	executablePath, recordPath := writeFakeWindowBinary(t)
 
-	proxy := desktop.NewDesktopWindowProxy(executablePath, "")
+	proxy := desktop.NewDesktopWindowProxy(executablePath)
 	t.Cleanup(proxy.Close)
 
 	require.NoError(t, proxy.Open("http://127.0.0.1:51234/"))
@@ -101,14 +101,14 @@ func TestDesktopWindowProxyStartsAgainAfterTheWindowIsGone(t *testing.T) {
 }
 
 func TestDesktopWindowProxyReportsAnExecutableItCannotStart(t *testing.T) {
-	proxy := desktop.NewDesktopWindowProxy(filepath.Join(t.TempDir(), "absent"), "")
+	proxy := desktop.NewDesktopWindowProxy(filepath.Join(t.TempDir(), "absent"))
 	t.Cleanup(proxy.Close)
 
 	require.Error(t, proxy.Open("http://127.0.0.1:51234/"))
 }
 
 func TestDesktopWindowProxyCloseIsSafeWhenNothingIsOpen(t *testing.T) {
-	proxy := desktop.NewDesktopWindowProxy(filepath.Join(t.TempDir(), "absent"), "")
+	proxy := desktop.NewDesktopWindowProxy(filepath.Join(t.TempDir(), "absent"))
 
 	assert.NotPanics(t, proxy.Close)
 	assert.NotPanics(t, proxy.Close)
