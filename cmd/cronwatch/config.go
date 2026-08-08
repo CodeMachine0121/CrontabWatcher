@@ -64,6 +64,13 @@ type ServerConfiguration struct {
 	// WrapperBinaryPath 是寫進 crontab 條目的執行檔路徑。
 	WrapperBinaryPath string
 
+	// DesktopRefreshInterval 是桌面形態重新確認現況的間隔。
+	DesktopRefreshInterval time.Duration
+	// DesktopSummaryLineLimit 是選單列摘要最多列幾筆。
+	DesktopSummaryLineLimit int
+	// DesktopLockFilePath 是保證單一實例的鎖檔位置，由 applyDesktopDefaults 決定。
+	DesktopLockFilePath string
+
 	// Location 是計算「下次執行時間」用的時區。cron 的排程語意綁在時區上。
 	Location *time.Location
 
@@ -111,6 +118,9 @@ func loadServerConfiguration() ServerConfiguration {
 	wrapperBinaryPath, warning := resolveWrapperBinaryPath()
 	warnings = appendWarning(warnings, warning)
 
+	desktopRefreshInterval, desktopSummaryLineLimit, desktopWarnings := loadDesktopSettings()
+	warnings = append(warnings, desktopWarnings...)
+
 	return ServerConfiguration{
 		ServerAddress:           stringWithDefault("SERVER_ADDRESS", defaultServerAddress),
 		CrontabSource:           crontabSource,
@@ -126,6 +136,8 @@ func loadServerConfiguration() ServerConfiguration {
 		LogTailLines:            logTailLines,
 		RunRecordRetentionCount: retentionCount,
 		WrapperBinaryPath:       wrapperBinaryPath,
+		DesktopRefreshInterval:  desktopRefreshInterval,
+		DesktopSummaryLineLimit: desktopSummaryLineLimit,
 		Location:                location,
 		Warnings:                warnings,
 	}
