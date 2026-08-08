@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **crontab-watcher** — 在瀏覽器上檢視與操作 cronjob 的 **Go 單一 binary 服務**（個人側項目，僅 James Hsueh 本人使用，非公開對外服務、無鑑權）。核心價值：把散落在 crontab 檔案裡的排程條目、以及各自被 redirect 到不同位置的 log，聚合成一個網頁介面——**看得到有哪些 job、下次何時跑、上次跑成功還是失敗、輸出是什麼**，並可從瀏覽器手動觸發一次執行。
 
-> **目前狀態：綠地專案。** repo 內除本文件與部署骨架（`Dockerfile`／`docker-compose.yml`／`Makefile`）外**沒有任何 Go 程式碼、沒有 `go.mod`**。第一步是依下方 SDD 流程開 `.sdd/UL-MAP.md` 與第一個切片，勿假設任何 package 已存在。
->
-> module path 定為 `github.com/james-hsueh/crontab-watcher`。
+> **目前狀態：五個切片都已實作完成並通過驗收。** module path 為
+> `github.com/james-hsueh/crontab-watcher`。`make check`（build + vet + test）全綠，
+> `postman/crontab-watcher.postman_collection.json` 以 newman 實跑 28 個 request、
+> 75 個斷言全過。
 
 ### 領域的兩個核心事實（設計的地基）
 
@@ -38,9 +39,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > 修改業務邏輯或新增功能時，對應的 SDD 文件（尤其 UL-MAP 與該切片的 PRD）需同步更新，文件與程式碼不可漂移。**新增功能請開新的 `.sdd/{date}-{feature-slug}/` 資料夾**，不要回頭改舊切片的 PRD。
 
-### 規劃中的切片順序
+### 切片（皆已完成）
 
-依賴由低到高，一次一個切片做完再往下：
+依賴由低到高實作：
 
 1. `crontab-parsing` — crontab 檔案 parse（含註解／空行／環境變數行／`@daily` alias／停用條目）、`CronSchedule.NextRunAt()`、redirect log 路徑解析
 2. `job-listing` — `GET /jobs` 與網頁 job 清單（排程、下次執行、log 來源分類）
@@ -54,7 +55,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |:---|:---|:---|
 | 語言 | **Go 1.26** | 全專案；編譯成單一 static binary，無 runtime 依賴。禁用空介面 `any`（`interface{}`）與反射濫用（例外見 Conventions） |
 | Web 框架 | **Gin** | REST API + HTML 渲染（Controller 層）。handler 只做 HTTP 請求／回應轉換 |
-| 前端 | **`html/template` + `go:embed` + htmx**（無 Node、無 build step） | server 回傳完整頁面或 HTML fragment；htmx 以 `hx-get` + `hx-trigger="every 10s"` 輪詢刷新 job 狀態與 log 尾巴。CSS 為單一手寫檔，**禁止 CDN 依賴**（離線可用）。templates 與 static 資產以 `go:embed` 內嵌進 binary |
+| 前端 | **`html/template` + `go:embed` + 原生 JS**（無 Node、無 build step、無前端框架） | server 回傳完整頁面或 HTML fragment；約 40 行原生 JS 負責定時抓 fragment 換掉 `innerHTML`，以及按鈕發請求後刷新。**刻意不用 htmx**——它得 vendoring 一份 min.js，而 CDN 依賴被禁（這服務常跑在沒有對外網路的機器上），而我們只需要「輪詢換內容」與「發 POST」兩件事。CSS 為單一手寫檔。templates 與 static 資產以 `go:embed` 內嵌進 binary |
 | 排程解析 | **`adhocore/gronx`** | **只當 parser 用**：驗證 cron 表達式、算 `NextTick()`／`PrevTick()`。零依賴純計算，故允許被 domain entity 直接使用（比照 go-stock 讓 domain 依賴 `decimal` 的先例）。**不使用其 tasker／daemon 功能** |
 | 排程執行 | **容器內 busybox `crond`**（自管模式）或 **host 的 cron**（唯讀模式） | 本服務**不是排程器**、不在程式內跑 `time.Ticker` 排程 job。cron 由系統負責，本服務只讀寫 crontab 檔並提供 wrapper |
 | 持久化 | **檔案系統（無資料庫）** | **不使用任何 SQL／ORM。** crontab 檔＝job 的真實來源；`runs.jsonl`（append-only JSON Lines）＝執行紀錄；log 目錄＝輸出內容。全部即時讀取。此規模不需要 DB，也讓 volume 掛載與備份等於 `cp` |
@@ -63,7 +64,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 測試 | **`testing` + `stretchr/testify`** | table-driven 單元測試；mock 由 `mockery`（`.mockery.yaml`）依介面產生於 `internal/domain/interface/mocks/` |
 | 程式碼品質 | **（尚未建置自動化）** | **沒有** `.golangci.yml`／lefthook／pre-commit hook；規範靠人工遵守。新增自動化前勿假設它存在 |
 | 部署 | **Dockerfile（multi-stage）+ docker-compose** | 見下方「部署」。alpine base，內含 busybox `crond` 與本服務 binary |
-| 對外交付 | **REST（JSON）+ HTML（htmx fragment）** | 無 SSE／WebSocket、無鑑權機制。**服務只綁 `127.0.0.1` 或內網**——它能執行任意指令，等同 remote shell，絕不可暴露到公網 |
+| 對外交付 | **REST（JSON）+ HTML（可輪詢的 fragment）** | 無 SSE／WebSocket、無鑑權機制。**服務只綁 `127.0.0.1` 或內網**——它能執行任意指令，等同 remote shell，絕不可暴露到公網 |
 
 ## Architecture — Clean / Onion Architecture
 
@@ -216,15 +217,16 @@ managed job 的 crontab 條目長這樣：
 | `SHELL_PATH` | `/bin/sh` | 執行指令用的 shell |
 | `LOG_TAIL_LINES` | `200` | 預設回傳的 log 尾巴行數 |
 | `RUN_RECORD_RETENTION_COUNT` | `500` | 每個 job 在 `runs.jsonl` 保留的紀錄筆數，超出時壓縮重寫檔案 |
+| `WRAPPER_BINARY_PATH` | 自己的執行檔絕對路徑 | 寫進 crontab 條目的執行檔路徑。**用 `make start`／`go run` 時必須明確設定**——那時執行檔在暫存目錄下，寫進 crontab 的條目會在檔案被清掉後失效（偵測到暫存路徑時會印警告） |
 | `TZ` | `Asia/Taipei` | **cron 排程時區**，用於計算「下次執行時間」。必須與實際跑 cron 的環境一致，否則顯示的時間會錯 |
 
-### 規劃中的 API Routes（註冊於 `cmd/cronwatch/dependencies.go` 的 `registerRoutes`）
+### API Routes（註冊於 `cmd/cronwatch/dependencies.go` 的 `registerRoutes`）
 
-**頁面與 fragment（htmx）**
+**頁面與 fragment（供輪詢）**
 
 - `GET /` — 主頁：job 清單
 - `GET /jobs/:jobId/detail` — job 詳情頁（排程、log 來源、執行歷史）
-- `GET /fragments/jobs` — job 清單 fragment（htmx 輪詢刷新）
+- `GET /fragments/jobs` — job 清單 fragment（每 15 秒輪詢刷新）
 - `GET /fragments/jobs/:jobId/runs` — 執行歷史 fragment
 - `GET /fragments/jobs/:jobId/log` — log 尾巴 fragment
 
@@ -243,7 +245,11 @@ managed job 的 crontab 條目長這樣：
 
 錯誤碼慣例：`400` 表達式或參數不合法、`403` 功能被設定關閉、`404` job 不存在、`409` 狀態衝突（外部改動 crontab／無 log 可讀）、`502` 底層檔案或指令操作失敗。
 
-Postman 測試集放 `postman/`，新增／修改路由需同步更新。
+Postman 集合在 `postman/crontab-watcher.postman_collection.json`，新增／修改路由需同步更新。以 newman 跑：
+
+```
+newman run postman/crontab-watcher.postman_collection.json --env-var baseUrl=http://127.0.0.1:8080
+```
 
 ## Layout
 

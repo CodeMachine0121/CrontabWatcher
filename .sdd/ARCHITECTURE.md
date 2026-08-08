@@ -187,9 +187,9 @@ wrapper 內任何**自身**的錯誤（寫不進 `runs.jsonl` 等）一律寫 st
 ## 8. Controller 與 template
 
 - JSON 與 HTML fragment 共用同一組 application 呼叫，只有 render 方式不同。
-- template 以 `go:embed` 內嵌 `internal/web/templates/*.gohtml`；static CSS 內嵌 `internal/web/static/`。
-- htmx 由 `internal/web/static/htmx.min.js` **內嵌供應**（不用 CDN，離線可用）。
-- fragment 端點回傳的是 `<tbody>`／`<pre>` 等片段，由 `hx-get` + `hx-swap="outerHTML"` 替換。
+- template 以 `go:embed` 內嵌 `internal/web/templates/*.gohtml`；static CSS 與 JS 內嵌 `internal/web/static/`。
+- **不使用 htmx**（實作時撤回）：需要 vendoring 一份 min.js 而 CDN 依賴被禁，且需求只有「輪詢換 innerHTML」與「按鈕發請求」兩件事，約 40 行原生 JS 即可。
+- fragment 端點回傳的是 `<tbody>`／`<pre>` 等片段，由帶 `data-poll-url` 的容器定時抓取並換掉自己的 `innerHTML`。抓失敗時保留上一次的內容，不清空。
 
 ## 9. 組態
 

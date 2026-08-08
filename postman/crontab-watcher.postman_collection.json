@@ -1,0 +1,966 @@
+{
+  "info": {
+    "name": "crontab-watcher",
+    "description": "Exercises every route registered in cmd/cronwatch/dependencies.go registerRoutes.\n\nRun the server first:\n\n    make build\n    WRAPPER_BINARY_PATH=$PWD/bin/cronwatch \\\n    CRONTAB_FILE_PATH=./data/crontabs/root \\\n    RUN_LOG_DIRECTORY=./data/logs \\\n    RUN_RECORD_FILE_PATH=./data/runs.jsonl \\\n    CRONTAB_BACKUP_DIRECTORY=./data/backups \\\n    ./bin/cronwatch serve\n\nThere is no authentication: the service is expected to bind loopback only, since it can execute arbitrary commands.\n\nRun the requests in order. 'Create cron job' captures createdJobId and the requests after it depend on that variable; 'Delete cron job' cleans it up again. 'List cron jobs' captures the first existing entry into jobId.\n\nTwo requests have side effects on the real crontab file and are placed last on purpose: 'Adopt a hand-written job' rewrites that entry, strips its output redirect and moves its log to the managed directory.\n\nThe 403 cases are not included as requests because they require restarting the server with CRONTAB_WRITE_ENABLED=false or MANUAL_TRIGGER_ENABLED=false. With either switch off, every write route and POST /jobs/{jobId}/run answer 403 with a hint naming the variable to change.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8080",
+      "description": "Where the server listens. Matches the SERVER_ADDRESS default, which binds loopback only."
+    },
+    {
+      "key": "jobId",
+      "value": "",
+      "description": "First entry found in the crontab. Captured by 'List cron jobs'."
+    },
+    {
+      "key": "createdJobId",
+      "value": "",
+      "description": "Identifier of the job created by this collection. Captured by 'Create cron job'."
+    },
+    {
+      "key": "unknownJobId",
+      "value": "no-such-job",
+      "description": "An identifier that does not exist, for the 404 case."
+    },
+    {
+      "key": "scheduleExpression",
+      "value": "0 3 * * *",
+      "description": "Five-field expression or an @ alias. Six-field (seconds) expressions are rejected on purpose."
+    },
+    {
+      "key": "command",
+      "value": "/bin/echo hello from postman",
+      "description": "Command for the created job. Kept harmless so the trigger request is safe to run."
+    },
+    {
+      "key": "jobDescription",
+      "value": "created by the postman collection",
+      "description": "Optional note. Stored as a cronwatch marker so it is removed together with the job."
+    },
+    {
+      "key": "updatedScheduleExpression",
+      "value": "30 4 * * *",
+      "description": "Replacement schedule used by 'Update cron job'."
+    },
+    {
+      "key": "updatedCommand",
+      "value": "/bin/echo updated by postman",
+      "description": "Replacement command used by 'Update cron job'."
+    },
+    {
+      "key": "updatedJobDescription",
+      "value": "edited by the postman collection",
+      "description": "Replacement note used by 'Update cron job'."
+    },
+    {
+      "key": "invalidScheduleExpression",
+      "value": "every other tuesday",
+      "description": "Unparseable expression, for the 400 case."
+    },
+    {
+      "key": "commandWithNewline",
+      "value": "/bin/echo first\\n0 0 * * * /bin/echo smuggled",
+      "description": "A newline would split one entry into two, so it is rejected. This is the 400 case."
+    },
+    {
+      "key": "logTailLines",
+      "value": "50",
+      "description": "Lines to read from the end of the log. Clamped to 5000."
+    },
+    {
+      "key": "runHistoryLimit",
+      "value": "20",
+      "description": "Run records to return, newest first. Clamped to 1000."
+    },
+    {
+      "key": "invalidLineCount",
+      "value": "abc",
+      "description": "Not a positive integer, for the 400 case."
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Liveness check. Also what the container healthcheck calls."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('reports ok', function () {",
+              "    pm.expect(pm.response.json().status).to.eql('ok');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List cron jobs",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs"]
+        },
+        "description": "Every entry in the crontab, in file order, with the next run time, where the output can be read from, and the most recent run.\n\nThe crontab is re-read on every call; there is no cache, because the user also edits that file with crontab -e.\n\nnextRunAt is null for disabled jobs and for @reboot: offering a time for something that will not run would mislead."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const jobs = pm.response.json();",
+              "pm.test('returns an array', function () { pm.expect(jobs).to.be.an('array'); });",
+              "",
+              "if (jobs.length > 0) {",
+              "    pm.collectionVariables.set('jobId', jobs[0].jobId);",
+              "",
+              "    pm.test('each job says where its output can be read from', function () {",
+              "        jobs.forEach(function (job) {",
+              "            pm.expect(['managed', 'redirect', 'none']).to.include(job.logSource);",
+              "            pm.expect(['managed', 'foreign']).to.include(job.origin);",
+              "        });",
+              "    });",
+              "",
+              "    pm.test('a disabled job has no next run time', function () {",
+              "        jobs.filter(function (job) { return !job.enabled; })",
+              "            .forEach(function (job) { pm.expect(job.nextRunAt).to.eql(null); });",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get crontab content",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/crontab",
+          "host": ["{{baseUrl}}"],
+          "path": ["crontab"]
+        },
+        "description": "The crontab file verbatim, as text/plain, for comparison against what the UI shows. This is a read, so it works in read-only mode too."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('is plain text', function () {",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/plain');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create cron job",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"scheduleExpression\": \"{{scheduleExpression}}\",\n  \"command\": \"{{command}}\",\n  \"description\": \"{{jobDescription}}\",\n  \"enabled\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/jobs",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs"]
+        },
+        "description": "Appends a managed entry. The command is wrapped as `<binary> run --job=<id> -- <command>` so cron-triggered runs go through the wrapper and produce a real exit code.\n\nEverything already in the file is left byte-for-byte unchanged, and the previous version is copied into the backup directory.\n\n`enabled` is optional and defaults to true. `description` is optional; it is stored as a cronwatch marker rather than a plain comment so it can be removed again with the job.\n\nRequires CRONTAB_WRITE_ENABLED (default true), otherwise 403."
+        },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 201', function () { pm.response.to.have.status(201); });",
+              "",
+              "const job = pm.response.json();",
+              "pm.collectionVariables.set('createdJobId', job.jobId);",
+              "",
+              "pm.test('the new job is managed', function () {",
+              "    pm.expect(job.origin).to.eql('managed');",
+              "    pm.expect(job.logSource).to.eql('managed');",
+              "});",
+              "pm.test('the command comes back unwrapped', function () {",
+              "    pm.expect(job.command).to.eql(pm.collectionVariables.get('command'));",
+              "});",
+              "pm.test('the raw crontab command carries the wrapper', function () {",
+              "    pm.expect(job.rawCommand).to.include('run --job=' + job.jobId + ' --');",
+              "});",
+              "pm.test('the description is stored', function () {",
+              "    pm.expect(job.description).to.eql(pm.collectionVariables.get('jobDescription'));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get cron job",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}"]
+        },
+        "description": "A single entry, same shape as one element of the list."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('is the job we created', function () {",
+              "    pm.expect(pm.response.json().jobId).to.eql(pm.collectionVariables.get('createdJobId'));",
+              "});",
+              "pm.test('reports the line it occupies in the crontab', function () {",
+              "    pm.expect(pm.response.json().lineNumber).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List job runs (before any run)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}/runs?limit={{runHistoryLimit}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}", "runs"],
+          "query": [{ "key": "limit", "value": "{{runHistoryLimit}}" }]
+        },
+        "description": "Run history, newest first. `limit` is optional and clamped to 1000.\n\nA job that has never run returns an empty array with no unavailableReason. A hand-written (foreign) job returns an empty array *with* a reason, because cron bypasses the wrapper for those and leaves no exit code to record."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const runList = pm.response.json();",
+              "pm.test('empty history for a job that has not run', function () {",
+              "    pm.expect(runList.runs).to.be.an('array').that.is.empty;",
+              "});",
+              "pm.test('a managed job needs no explanation for the empty history', function () {",
+              "    pm.expect(runList.unavailableReason).to.eql('');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tail job log (before any run)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}/log?lines={{logTailLines}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}", "log"],
+          "query": [{ "key": "lines", "value": "{{logTailLines}}" }]
+        },
+        "description": "Reads from the end of the job's log file. `lines` is optional, defaults to LOG_TAIL_LINES and is clamped to 5000.\n\nA log file that does not exist yet is not an error: the response is 200 with exists=false. That is reported separately from an existing-but-empty file, because 'has not run yet' and 'ran and produced nothing' are different facts."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const log = pm.response.json();",
+              "pm.test('the log file does not exist yet', function () {",
+              "    pm.expect(log.exists).to.eql(false);",
+              "    pm.expect(log.content).to.eql('');",
+              "});",
+              "pm.test('but the path it would be read from is reported', function () {",
+              "    pm.expect(log.filePath).to.include(pm.collectionVariables.get('createdJobId'));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Trigger job run",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}/run",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}", "run"]
+        },
+        "description": "Runs the job once immediately and returns the completed run record. The request blocks until the command finishes or MANUAL_TRIGGER_TIMEOUT_SECONDS elapses.\n\nCancelling the HTTP request does not kill the command: closing a browser tab must not stop a backup halfway.\n\nA second call while the first is still running answers 409, because cronjobs are usually not idempotent.\n\nRequires MANUAL_TRIGGER_ENABLED (default true), otherwise 403."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const run = pm.response.json();",
+              "pm.test('the run finished successfully', function () {",
+              "    pm.expect(run.runStatus).to.eql('succeeded');",
+              "    pm.expect(run.exitCode).to.eql(0);",
+              "});",
+              "pm.test('it is recorded as manually triggered', function () {",
+              "    pm.expect(run.triggerSource).to.eql('manual');",
+              "});",
+              "pm.test('the command output was captured', function () {",
+              "    pm.expect(run.outputExcerpt).to.include('hello from postman');",
+              "});",
+              "pm.test('a finished run carries a duration', function () {",
+              "    pm.expect(run.durationMilliseconds).to.not.eql(null);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List job runs (after the run)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}/runs",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}", "runs"]
+        },
+        "description": "The same endpoint after a run exists, to confirm the record was persisted to runs.jsonl."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('the triggered run is in the history', function () {",
+              "    const runs = pm.response.json().runs;",
+              "    pm.expect(runs).to.have.lengthOf.at.least(1);",
+              "    pm.expect(runs[0].runStatus).to.eql('succeeded');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tail job log (after the run)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}/log",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}", "log"]
+        },
+        "description": "The log file now exists and carries the run delimiters the wrapper writes around each execution, so a human can split a shared log back into individual runs."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const log = pm.response.json();",
+              "pm.test('the log file exists now', function () { pm.expect(log.exists).to.eql(true); });",
+              "pm.test('it contains the command output', function () {",
+              "    pm.expect(log.content).to.include('hello from postman');",
+              "});",
+              "pm.test('runs are delimited in the log', function () {",
+              "    pm.expect(log.content).to.include('cronwatch run');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Disable cron job",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}/disable",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}", "disable"]
+        },
+        "description": "Comments the entry out rather than deleting it, keeping the line text intact so enabling restores it exactly.\n\nThe identifier does not change: a foreign job's digest is computed from the entry with its leading hash stripped."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const job = pm.response.json();",
+              "pm.test('the job is disabled', function () { pm.expect(job.enabled).to.eql(false); });",
+              "pm.test('a disabled job has no next run time', function () {",
+              "    pm.expect(job.nextRunAt).to.eql(null);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Enable cron job",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}/enable",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}", "enable"]
+        },
+        "description": "Removes the leading hash and at most one following space, which makes the disable/enable pair exactly reversible including the original column alignment."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const job = pm.response.json();",
+              "pm.test('the job is enabled again', function () { pm.expect(job.enabled).to.eql(true); });",
+              "pm.test('a next run time is available again', function () {",
+              "    pm.expect(job.nextRunAt).to.not.eql(null);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Update cron job",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"scheduleExpression\": \"{{updatedScheduleExpression}}\",\n  \"command\": \"{{updatedCommand}}\",\n  \"description\": \"{{updatedJobDescription}}\",\n  \"enabled\": true\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}"]
+        },
+        "description": "Replaces the entry line only; every other line in the file is untouched.\n\nA managed job stays managed and keeps its identifier. A hand-written job stays hand-written: asking to change a schedule is not asking to have the output silently relocated.\n\nSending an empty description removes the description marker."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const job = pm.response.json();",
+              "pm.test('the schedule and command were replaced', function () {",
+              "    pm.expect(job.scheduleExpression).to.eql(pm.collectionVariables.get('updatedScheduleExpression'));",
+              "    pm.expect(job.command).to.eql(pm.collectionVariables.get('updatedCommand'));",
+              "});",
+              "pm.test('the identifier is unchanged', function () {",
+              "    pm.expect(job.jobId).to.eql(pm.collectionVariables.get('createdJobId'));",
+              "});",
+              "pm.test('it is still managed', function () { pm.expect(job.origin).to.eql('managed'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Adopt an already managed job (409)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}/adopt",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}", "adopt"]
+        },
+        "description": "Adopting a job that is already managed is a conflict, not a no-op: silently succeeding would suggest something changed."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 409', function () { pm.response.to.have.status(409); });",
+              "pm.test('the reason names the state', function () {",
+              "    pm.expect(pm.response.json().error).to.include('already managed');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Delete cron job",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}"]
+        },
+        "description": "Removes the entry and the cronwatch markers above it (identifier, description, stripped redirect). The user's own comments are left alone, because there is no reliable way to tell which job such a comment belongs to.\n\nDeleting removes the line; disable is the reversible option."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 204', function () { pm.response.to.have.status(204); });",
+              "pm.test('there is no body', function () {",
+              "    pm.expect(pm.response.text()).to.eql('');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get a deleted job (404)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{createdJobId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{createdJobId}}"]
+        },
+        "description": "Confirms the delete took effect."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 404', function () { pm.response.to.have.status(404); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get an unknown job (404)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{unknownJobId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{unknownJobId}}"]
+        },
+        "description": "An identifier that is not in the crontab."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('the error names the missing job', function () {",
+              "    pm.expect(pm.response.json().error).to.include('not found');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create with an invalid schedule (400)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"scheduleExpression\": \"{{invalidScheduleExpression}}\",\n  \"command\": \"/bin/true\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/jobs",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs"]
+        },
+        "description": "Validation happens before the crontab file is opened, so a malformed request causes no I/O at all and cannot leave a partial write."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('the error names the problem', function () {",
+              "    pm.expect(pm.response.json().error).to.include('invalid cron expression');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create with a six-field schedule (400)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"scheduleExpression\": \"0 0 3 * * *\",\n  \"command\": \"/bin/true\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/jobs",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs"]
+        },
+        "description": "Six-field expressions with a seconds column are refused on purpose. Neither busybox crond nor standard cron accepts them, so taking one would make the displayed next-run time disagree with what actually happens."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('the error explains the field count', function () {",
+              "    pm.expect(pm.response.json().error).to.include('5 fields');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create with a newline in the command (400)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"scheduleExpression\": \"0 3 * * *\",\n  \"command\": \"{{commandWithNewline}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/jobs",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs"]
+        },
+        "description": "crontab is a one-entry-per-line format. A newline in the command would split one entry into two, and the second line could become a schedule nobody intended."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('the error names the line break', function () {",
+              "    pm.expect(pm.response.json().error).to.include('line break');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tail log with a bad line count (400)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{jobId}}/log?lines={{invalidLineCount}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{jobId}}", "log"],
+          "query": [{ "key": "lines", "value": "{{invalidLineCount}}" }]
+        },
+        "description": "A mistyped query parameter is rejected rather than ignored: silently falling back to the default would let the caller believe their value took effect.\n\nAn excessive but valid number is different — that is clamped, because returning 5000 of the 10000 lines asked for is a usable answer."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('the error names the parameter', function () {",
+              "    pm.expect(pm.response.json().error).to.include('lines');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tail log of a job with no readable output (409)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{jobId}}/log",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{jobId}}", "log"]
+        },
+        "description": "Only meaningful when {{jobId}} is a hand-written job whose output goes nowhere or to /dev/null; otherwise this request answers 200 and the assertions below are skipped.\n\nThis is 409 rather than 200 with an empty body on purpose: an empty body reads as 'ran and produced nothing', which is a different fact from 'there is no way for us to know'. The hint names the fix."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 409) {",
+              "    pm.test('the reason is stated', function () {",
+              "        pm.expect(pm.response.json().error).to.include('job log unavailable');",
+              "    });",
+              "    pm.test('a next step is suggested', function () {",
+              "        pm.expect(pm.response.json().hint).to.include('adopt');",
+              "    });",
+              "} else {",
+              "    pm.test('this job does have a readable log, so 200 is correct', function () {",
+              "        pm.response.to.have.status(200);",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Job list page",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "text/html" }],
+        "url": {
+          "raw": "{{baseUrl}}/",
+          "host": ["{{baseUrl}}"],
+          "path": [""]
+        },
+        "description": "The browser page. Renders the same data as GET /jobs; only the rendering differs."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('is html', function () {",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('text/html');",
+              "});",
+              "pm.test('nothing was left unrendered', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('{{');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Job detail page",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "text/html" }],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{jobId}}/detail",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{jobId}}", "detail"]
+        },
+        "description": "Job facts, run history and log output on one page. A job with no readable log gets an explanation here rather than an error screen."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('nothing was left unrendered', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('{{');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Job table fragment",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "text/html" }],
+        "url": {
+          "raw": "{{baseUrl}}/fragments/jobs",
+          "host": ["{{baseUrl}}"],
+          "path": ["fragments", "jobs"]
+        },
+        "description": "The table body on its own. The page polls this every 15 seconds and swaps it in; a failed poll keeps the previous content rather than blanking the view."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('is a fragment, not a whole page', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('<html');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Run table fragment",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "text/html" }],
+        "url": {
+          "raw": "{{baseUrl}}/fragments/jobs/{{jobId}}/runs",
+          "host": ["{{baseUrl}}"],
+          "path": ["fragments", "jobs", "{{jobId}}", "runs"]
+        },
+        "description": "Run history fragment, polled every 10 seconds on the detail page."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('is a fragment, not a whole page', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('<html');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Log fragment",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "text/html" }],
+        "url": {
+          "raw": "{{baseUrl}}/fragments/jobs/{{jobId}}/log",
+          "host": ["{{baseUrl}}"],
+          "path": ["fragments", "jobs", "{{jobId}}", "log"]
+        },
+        "description": "Log fragment, polled every 10 seconds on the detail page.\n\nUnlike the JSON endpoint this answers 200 even when there is no readable log, because the fragment renders the explanation itself instead of an error screen."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('is a fragment, not a whole page', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('<html');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Adopt a hand-written job",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/jobs/{{jobId}}/adopt",
+          "host": ["{{baseUrl}}"],
+          "path": ["jobs", "{{jobId}}", "adopt"]
+        },
+        "description": "SIDE EFFECT — this permanently rewrites that crontab entry. It is last in the collection for that reason.\n\nWraps the command so runs get a real exit code, and strips the trailing output redirect. Stripping is necessary: leaving it would send stdout away before the wrapper sees it and produce empty records, which is worse than none. The removed fragment is recorded in a marker so it can be restored.\n\nAfter this, output goes to the managed log directory and the original file stops being written to. The previous crontab is in the backup directory.\n\nAnswers 409 if the job is already managed."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 409) {",
+              "    pm.test('already managed, nothing to adopt', function () {",
+              "        pm.expect(pm.response.json().error).to.include('already managed');",
+              "    });",
+              "    return;",
+              "}",
+              "",
+              "pm.test('responds 200', function () { pm.response.to.have.status(200); });",
+              "",
+              "const job = pm.response.json();",
+              "pm.test('the job is now managed', function () {",
+              "    pm.expect(job.origin).to.eql('managed');",
+              "    pm.expect(job.logSource).to.eql('managed');",
+              "});",
+              "pm.test('it received a new identifier', function () {",
+              "    pm.expect(job.jobId).to.not.eql(pm.collectionVariables.get('jobId'));",
+              "});",
+              "pm.test('the command is wrapped', function () {",
+              "    pm.expect(job.rawCommand).to.include('run --job=' + job.jobId + ' --');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
