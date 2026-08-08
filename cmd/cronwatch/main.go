@@ -26,10 +26,10 @@ func main() {
 	_ = godotenv.Load()
 
 	arguments := os.Args[1:]
-	command := "serve"
-	if len(arguments) > 0 {
-		command = arguments[0]
-	}
+	executablePath, _ := os.Executable()
+
+	command := resolveCommand(arguments, executablePath)
+	remainingArguments := commandArguments(arguments)
 
 	switch command {
 	case "serve":
@@ -37,9 +37,9 @@ func main() {
 	case "desktop":
 		os.Exit(runDesktopCommand())
 	case "run":
-		os.Exit(runWrapperCommand(arguments[1:]))
+		os.Exit(runWrapperCommand(remainingArguments))
 	case "window":
-		os.Exit(runWindowCommand(arguments[1:]))
+		os.Exit(runWindowCommand(remainingArguments))
 	case "-h", "--help", "help":
 		fmt.Println(mainUsage)
 		os.Exit(0)
