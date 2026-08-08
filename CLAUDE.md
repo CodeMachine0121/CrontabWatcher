@@ -29,6 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    | **自管模式**（Docker 主推） | crontab 檔與 log 目錄掛在 volume 上，容器內同時是排程器（busybox `crond`）與執行環境 | ✅ | ✅ 結果可信 |
    | **唯讀模式** | Linux host 上把 host 的 crontab 掛進容器（`CRONTAB_WRITE_ENABLED=false`） | ❌ 回 403 | ⚠️ 容器內環境 ≠ host 環境，預設關閉 |
    | **host 模式**（`make start-host`） | 不用容器，直接在機器上跑，看 `crontab -l` 列出的**使用者真正那份 crontab**（`CRONTAB_SOURCE=crontabCommand`） | ✅ 經由 `crontab <file>` | ✅ 環境就是 host 環境，結果可信 |
+   | **桌面模式**（`make start-desktop`，僅 macOS） | host 模式的另一種**呈現方式**：進駐選單列，不必開終端機也不必開瀏覽器分頁；資料來源與 host 模式完全相同 | ✅ 同 host 模式 | ✅ 同 host 模式 |
 
    **macOS host 無法用唯讀模式**——Docker Desktop 跑在 Linux VM 內，掛不到 `/var/at/tabs/`、也叫不到 host 的 `crontab` 命令。在 Mac 上想看自己真正的 crontab，用 **host 模式**（`make start-host`）。
 
@@ -39,6 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `.sdd/UL-MAP.md` — 通用語言地圖。**所有實體 / 動作 / 識別字命名以此為準**，不得自創同義詞。下方「通用語言（UL-MAP 種子）」是它的初始內容來源。
 - `.sdd/{YYYY-MM-DD}-{feature-slug}/BRIEF.md` — 該功能切片的需求共識。
 - `.sdd/{YYYY-MM-DD}-{feature-slug}/PRD.md` — 該功能切片的需求、User Stories、Business Flow，為實作的單一真實來源。
+- `.sdd/{YYYY-MM-DD}-{feature-slug}/ARCH.md` — 該切片的技術設計（哪些元件、為什麼這樣切、擴充點在哪）。PRD 只談業務，ARCH 才談實作。
 
 > 修改業務邏輯或新增功能時，對應的 SDD 文件（尤其 UL-MAP 與該切片的 PRD）需同步更新，文件與程式碼不可漂移。**新增功能請開新的 `.sdd/{date}-{feature-slug}/` 資料夾**，不要回頭改舊切片的 PRD。
 
@@ -51,6 +53,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. `run-log-viewing` — 讀 log 檔 tail、foreign job 的原始輸出檢視
 4. `manual-trigger` — `POST /jobs/:jobId/run`，wrapper 執行 + `runs.jsonl` 落地 + 執行歷史
 5. `crontab-writing` — CRUD 寫回 crontab（原子寫入 + 備份 + `crontab <file>` 驗證 + crond reload）、job 啟用／停用、foreign → managed 轉換
+6. `host-crontab-access` — 走 `crontab -l` / `crontab <file>` 存取使用者真正那份 crontab（host 模式）
+7. `desktop-menu-bar-app` — macOS 選單列常駐應用：狀態指示、摘要、失敗通知、獨立視窗（僅呈現方式，不引入新資料來源）
 
 ## Tech Stack
 
@@ -58,6 +62,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |:---|:---|:---|
 | 語言 | **Go 1.26** | 全專案；編譯成單一 static binary，無 runtime 依賴。禁用空介面 `any`（`interface{}`）與反射濫用（例外見 Conventions） |
 | Web 框架 | **Gin** | REST API + HTML 渲染（Controller 層）。handler 只做 HTTP 請求／回應轉換 |
+| 桌面外殼 | **`energye/systray`（選單列）+ `webview/webview_go`（獨立視窗）** | **僅 macOS，且只出現在 `_darwin.go` 檔案中**。選它們而不是更知名的 `getlantern/systray`：後者拖進 17 個模組（含 Windows GUI 的 `lxn/walk`），前者只多一個 Linux 專用的 `godbus`。兩者都需要 CGO，因此 `GOOS=linux CGO_ENABLED=0` 的容器建置**不會編到它們**——不支援的平台在編譯期就分流（`menu_bar_controller_other.go`）。**`cmd/cronwatch` 在 darwin 上有一個 `runtime.LockOSThread()` 的 init**：Go 只保證 main 從主執行緒開始，而 NSApplication 只肯跑在主執行緒上 |
 | 前端 | **`html/template` + `go:embed` + 原生 JS**（無 Node、無 build step、無前端框架） | server 回傳完整頁面或 HTML fragment；約 40 行原生 JS 負責定時抓 fragment 換掉 `innerHTML`，以及按鈕發請求後刷新。**刻意不用 htmx**——它得 vendoring 一份 min.js，而 CDN 依賴被禁（這服務常跑在沒有對外網路的機器上），而我們只需要「輪詢換內容」與「發 POST」兩件事。CSS 為單一手寫檔。templates 與 static 資產以 `go:embed` 內嵌進 binary |
 | 排程解析 | **`adhocore/gronx`** | **只當 parser 用**：驗證 cron 表達式、算 `NextTick()`／`PrevTick()`。零依賴純計算，故允許被 domain entity 直接使用（比照 go-stock 讓 domain 依賴 `decimal` 的先例）。**不使用其 tasker／daemon 功能** |
 | 排程執行 | **容器內 busybox `crond`**（自管模式）或 **host 的 cron**（唯讀模式） | 本服務**不是排程器**、不在程式內跑 `time.Ticker` 排程 job。cron 由系統負責，本服務只讀寫 crontab 檔並提供 wrapper |
@@ -181,6 +186,7 @@ Go modules 管理依賴；`Makefile` 為主要入口。
 
 - `go mod download` / `go mod tidy` — 安裝 / 整理依賴
 - `make start`（`go run ./cmd/cronwatch serve`）— 本機啟動 server（讀 `.env`，`godotenv.Load()`）
+- `make start-desktop`（`./bin/cronwatch desktop`）— 進駐 macOS 選單列（僅 macOS；先 build，因為執行檔路徑會被寫進 crontab 也會用來開視窗子程序）
 - `make build`（`go build -o bin/cronwatch ./cmd/cronwatch`）— 編譯單一 binary
 - `make test`（`go test ./...`）— 跑全部單元測試
 - `make vet`（`go vet ./...`）— 靜態檢查
@@ -189,13 +195,15 @@ Go modules 管理依賴；`Makefile` 為主要入口。
 - 執行單一測試：`go test ./internal/path/to/... -run TestName`
 - 重新產生 mock：`mockery`（讀取 `.mockery.yaml`，需先安裝 `mockery` CLI）
 
-### binary 的兩個 subcommand
+### binary 的四個 subcommand
 
-**同一個 binary 兩種身分**，這是設計核心——wrapper 必須與 server 同一個 binary 才能保證部署一致：
+**同一個 binary 幾種身分**，這是設計核心——wrapper 必須與 server 同一個 binary 才能保證部署一致；桌面模式的視窗子程序同理：
 
 | 指令 | 用途 |
 |:---|:---|
 | `cronwatch serve` | 啟動 web server（預設） |
+| `cronwatch desktop` | 進駐 macOS 選單列（僅 macOS）。強制 `CRONTAB_SOURCE=crontabCommand`、綁 `127.0.0.1:0`（臨時埠，其他裝置連不進來）、狀態預設放 `$HOME/.local/state/crontab-watcher/`（與 `start-host` 共用）。以檔案鎖保證單一實例 |
+| `cronwatch window --url=<address>` | 獨立視窗的子程序，由 `desktop` 啟動，通常不自己跑。**必須是獨立程序**：systray 與 webview 都要佔用 macOS 主 run loop。父程序以它的 stdin 送後續網址（一行一個），stdin 關閉即收掉視窗 |
 | `cronwatch run --job=<jobId> -- <command...>` | wrapper：執行指令、記錄 `JobRun` 到 `runs.jsonl`、輸出寫入該 job 的 log 檔，並以子程序的 exit code 作為自己的 exit code（讓 cron 的錯誤語意不失真） |
 
 managed job 的 crontab 條目長這樣：
@@ -223,6 +231,8 @@ managed job 的 crontab 條目長這樣：
 | `LOG_TAIL_LINES` | `200` | 預設回傳的 log 尾巴行數 |
 | `RUN_RECORD_RETENTION_COUNT` | `500` | 每個 job 在 `runs.jsonl` 保留的紀錄筆數，超出時壓縮重寫檔案 |
 | `WRAPPER_BINARY_PATH` | 自己的執行檔絕對路徑 | 寫進 crontab 條目的執行檔路徑。**用 `make start`／`go run` 時必須明確設定**——那時執行檔在暫存目錄下，寫進 crontab 的條目會在檔案被清掉後失效（偵測到暫存路徑時會印警告） |
+| `DESKTOP_REFRESH_INTERVAL_SECONDS` | `30` | 桌面模式重新確認現況的間隔，預設 `30`，下界 5 秒。選單列展開時讀的是最近一次的快照，不強制重讀——點開的瞬間卡住比看到幾秒前的資料糟得多 |
+| `DESKTOP_SUMMARY_LINE_LIMIT` | `20` | 選單列摘要最多列幾筆，下界 1。超出的筆數會明確標示「另有 N 筆」，不安靜截斷 |
 | `TZ` | `Asia/Taipei` | **cron 排程時區**，用於計算「下次執行時間」。必須與實際跑 cron 的環境一致，否則顯示的時間會錯 |
 
 ### API Routes（註冊於 `cmd/cronwatch/dependencies.go` 的 `registerRoutes`）
@@ -262,27 +272,36 @@ newman run postman/crontab-watcher.postman_collection.json --env-var baseUrl=htt
 
 ```
 cmd/cronwatch/
-  main.go             — subcommand 分派（serve / run）
+  main.go             — subcommand 分派（serve / desktop / run / window）
   config.go           — 讀環境變數
   dependencies.go     — 手動 DI 與路由註冊
   run_command.go      — wrapper subcommand 的實作入口
+  desktop_command.go  — 選單列 subcommand 的實作入口
+  desktop_config.go   — 桌面模式的組態與預設值（applyDesktopDefaults）
+  window_command_darwin.go / _other.go — 獨立視窗子程序（webview；非 macOS 為明確不支援）
 internal/domain/
   entity/             — CronJob、CronSchedule、CrontabDocument、JobRun
+                        + DesktopStatus（整體狀態與摘要的歸納）
+                        + FailureNoticeLedger／FailureNotice（新失敗的判定與文字）
                         + parse_crontab_line.go（無狀態純轉換；crontab 文字的
                         解析是領域知識，不是 I/O 細節，故留在 domain）
                         + domain_error.go（所有領域哨兵錯誤集中一處）
-  vo/                 — CrontabLine、CommandRedirect
-  dto/                — CronJobDto、JobRunDto
-  service/            — CronJobService、JobRunService、CrontabEditService（一檔一 struct）
+  vo/                 — CrontabLine、CommandRedirect、JobStatusLine
+  dto/                — CronJobDto、JobRunDto、DesktopStatusDto
+  service/            — CronJobService、JobRunService、CrontabEditService、
+                        DesktopStatusService（一檔一 struct）
   interface/          — 對外介面（一檔一介面）+ mocks/
 internal/application/ — 用例編排
 internal/controller/  — Gin handler + Request struct + ViewModel
+                        + MenuBarController（_darwin / _other）與 MenuBarViewModel
 internal/infrastructure/
   crontab/            — CrontabDocumentRepository（讀寫 crontab 檔、原子寫入、備份）
                         + CrontabCommandRepository（走 crontab -l / crontab <file>，host 模式用）
   runlog/             — JobRunRepository（runs.jsonl）、JobLogRepository（tail log 檔）
   shell/              — CommandExecutionProxy（os/exec 執行指令、逾時、process group 清理）
-  system/             — IdentifierGenerator（uuid）、Clock
+  system/             — IdentifierGenerator（uuid）、Clock、InstanceLock（檔案鎖）
+  notification/       — NotificationProxy（osascript，文字一律走 argv）
+  desktop/            — DesktopWindowProxy（獨立視窗的子程序管理）
 internal/web/         — go:embed 的 templates/ 與 static/
 ```
 
