@@ -3,3 +3,4 @@ data/
 .env
 *.bak.*
 .DS_Store
+dist/

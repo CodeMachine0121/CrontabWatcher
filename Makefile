@@ -1,4 +1,4 @@
-.PHONY: start start-host start-desktop build test vet check docker-build docker-up docker-down docker-logs mocks
+.PHONY: start start-host start-desktop build app dmg test vet check docker-build docker-up docker-down docker-logs mocks
 
 BINARY := bin/cronwatch
 PACKAGE := ./cmd/cronwatch
@@ -66,6 +66,22 @@ start-host: build
 # 僅 macOS。其他平台會直接說明並退出。
 start-desktop: build
 	./$(BINARY) desktop
+
+# app／dmg 把服務包成一個可以拖進「應用程式」的 macOS app。
+#
+# 包起來之後雙擊即進駐選單列（binary 認得自己在 app bundle 裡，預設身分因此是
+# desktop 而不是 serve），而納管的 crontab 條目會指向
+# /Applications/CrontabWatcher.app/Contents/MacOS/cronwatch —— 一個不會因為重新
+# 編譯或清掉 bin/ 而消失的穩定路徑，這是它比 make start-desktop 更適合長期使用的
+# 原因。
+#
+# 版本號可覆寫：make dmg VERSION=0.2.0
+VERSION ?= 0.1.0
+
+app:
+	./scripts/package-macos-app.sh $(VERSION)
+
+dmg: app
 
 build:
 	go build -o $(BINARY) $(PACKAGE)
