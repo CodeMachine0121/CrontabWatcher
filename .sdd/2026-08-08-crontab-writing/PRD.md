@@ -26,7 +26,7 @@ POST /jobs（或 PUT/DELETE/enable/disable/adopt）
               ├─ 語法驗證（有 crontab 命令則 `crontab <temp>`；否則自行 parse 驗證）
               ├─ 備份現行檔 → <backupDir>/crontab.<RFC3339>.bak
               └─ os.Rename(temp, target)
-          crond reload proxy.Reload()（CROND_RELOAD_ENABLED 才做；失敗只記 warning）
+          （不需要通知 cron reload —— 見下方「為什麼沒有 reload 步驟」）
           → CronJobDto
 ```
 
@@ -68,6 +68,19 @@ POST /jobs（或 PUT/DELETE/enable/disable/adopt）
 ```
 
 已是 managed 的 job 再 adopt → `ErrCronJobAlreadyManaged`(409)。
+
+### 為什麼沒有 reload 步驟
+
+原本規劃了 `ICrondReloadProxy` 與 `CROND_RELOAD_ENABLED`，實作時**撤掉了**。
+
+busybox `crond`（自管模式）與 vixie cron（唯讀模式的 host）**都會自己偵測 crontab
+檔案的 mtime 變化並重新載入**，最長延遲一分鐘。而唯一「主動」的做法 `crontab <file>`
+其實是「安裝這份 crontab」，當 `CRONTAB_FILE_PATH` 本來就是 cron 的 spool 檔時，
+這個呼叫是循環且錯誤的。
+
+替一個不存在的問題留一個 no-op 抽象，比不留更糟：它會讓後來的人以為 reload 是必要
+步驟，並在它「失敗」時去除錯一件根本不影響結果的事。UI 上改為明示「變更最長一分鐘
+內生效」。
 
 ### 備份
 
@@ -126,8 +139,6 @@ POST /jobs（或 PUT/DELETE/enable/disable/adopt）
 | CW-31 | `DeleteCronJob` | Save 被呼叫、job 消失 |
 | CW-32 | `SetCronJobEnabled` | Save 被呼叫 |
 | CW-33 | `AdoptCronJob` | Save 被呼叫、回 managed DTO |
-| CW-34 | `CROND_RELOAD_ENABLED=true` | reload proxy 被呼叫一次 |
-| CW-35 | reload proxy 失敗 | **整體仍成功**（檔案已寫入，reload 失敗只是延遲生效） |
 | CW-36 | `Save` 回指紋衝突 | 錯誤原樣往上拋 |
 | CW-37 | `GetCrontabContent` | 回原文 |
 

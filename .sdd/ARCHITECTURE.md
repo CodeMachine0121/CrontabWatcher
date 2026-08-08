@@ -49,11 +49,6 @@ type ICommandExecutionProxy interface {
     Execute(ctx context.Context, command string, timeout time.Duration) (output string, exitCode int, timedOut bool, err error)
 }
 
-// i_crond_reload_proxy.go
-type ICrondReloadProxy interface {
-    Reload(crontabFilePath string) error
-}
-
 // i_identifier_generator.go
 type IIdentifierGenerator interface {
     NewIdentifier() string
@@ -129,7 +124,7 @@ func (run *JobRun) Succeeded() bool
 | `CronJobService` | `ListCronJobs(now)`、`GetCronJob(jobID, now)` | crontab repo、job run repo、clock（由 application 傳 now） |
 | `JobRunService` | `ListJobRuns(jobID, limit)`、`TailJobLog(jobID, lines)` | crontab repo、job run repo、job log repo |
 | `JobExecutionService` | `TriggerJobRun(ctx, jobID, source, timeout)`、`RecordWrapperRun(...)` | crontab repo、job run repo、job log repo、command proxy、id gen、clock |
-| `CrontabEditService` | `CreateCronJob`、`UpdateCronJob`、`DeleteCronJob`、`SetCronJobEnabled`、`AdoptCronJob`、`GetCrontabContent` | crontab repo、crond reload proxy、id gen |
+| `CrontabEditService` | `CreateCronJob`、`UpdateCronJob`、`DeleteCronJob`、`SetCronJobEnabled`、`AdoptCronJob`、`GetCrontabContent` | crontab repo、id gen |
 
 哨兵錯誤（controller 可 import 做狀態碼對映）：
 

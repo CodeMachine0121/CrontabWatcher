@@ -216,7 +216,6 @@ managed job 的 crontab 條目長這樣：
 | `SHELL_PATH` | `/bin/sh` | 執行指令用的 shell |
 | `LOG_TAIL_LINES` | `200` | 預設回傳的 log 尾巴行數 |
 | `RUN_RECORD_RETENTION_COUNT` | `500` | 每個 job 在 `runs.jsonl` 保留的紀錄筆數，超出時壓縮重寫檔案 |
-| `CROND_RELOAD_ENABLED` | `true` | 寫入 crontab 後是否通知 cron reload（自管模式呼叫 `crontab <file>`；唯讀模式無效） |
 | `TZ` | `Asia/Taipei` | **cron 排程時區**，用於計算「下次執行時間」。必須與實際跑 cron 的環境一致，否則顯示的時間會錯 |
 
 ### 規劃中的 API Routes（註冊於 `cmd/cronwatch/dependencies.go` 的 `registerRoutes`）
@@ -270,7 +269,8 @@ internal/controller/  — Gin handler + Request struct + ViewModel
 internal/infrastructure/
   crontab/            — CrontabDocumentRepository（讀寫 crontab 檔、原子寫入、備份）
   runlog/             — JobRunRepository（runs.jsonl）、JobLogRepository（tail log 檔）
-  shell/              — CommandExecutionProxy（os/exec）、CrondReloadProxy（呼叫 crontab 命令）
+  shell/              — CommandExecutionProxy（os/exec 執行指令、逾時、process group 清理）
+  system/             — IdentifierGenerator（uuid）、Clock
 internal/web/         — go:embed 的 templates/ 與 static/
 ```
 

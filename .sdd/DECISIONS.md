@@ -106,3 +106,15 @@ tail 只從檔尾往回讀，**單次讀取上限 1 MiB**。超大 log 檔不會
 `LogSource=none`（foreign job 且指令無 redirect）時，`GET /jobs/:jobId/log` 回 **409** 並附說明與建議動作（adopt），**不回 200 空字串**。
 
 **理由**：200 空字串會被讀成「跑過但沒輸出」，與「根本無從得知」是完全不同的事實。
+
+### D-17 · 沒有「通知 cron reload」這個步驟（實作時撤回原規劃）
+
+原本規劃了 `ICrondReloadProxy` 與 `CROND_RELOAD_ENABLED` 環境變數，實作時**移除**。
+
+busybox `crond`（自管模式）與 vixie cron（唯讀模式的 host）**都會自己偵測 crontab 檔案的
+mtime 變化並重新載入**，最長延遲一分鐘。而唯一「主動」的做法 `crontab <file>` 語意其實是
+「安裝這份 crontab」——當 `CRONTAB_FILE_PATH` 本身就是 cron 的 spool 檔時，這個呼叫是循環
+且錯誤的。
+
+**理由**：替一個不存在的問題留一個 no-op 抽象，比不留更糟——它會讓後來的人以為 reload 是
+必要步驟，並在它「失敗」時去除錯一件根本不影響結果的事。UI 改為明示「變更最長一分鐘內生效」。
