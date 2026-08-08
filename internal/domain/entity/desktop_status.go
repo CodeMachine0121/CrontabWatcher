@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"sort"
 	"time"
 
 	"github.com/james-hsueh/crontab-watcher/internal/domain/vo"
@@ -102,9 +103,72 @@ func (status *DesktopStatus) UnavailableReason() string {
 	return status.unavailableReason
 }
 
-// Lines 回傳摘要行與被略過的筆數。
+// Lines 回傳摘要行與**被略過的筆數**。limit 為 0 或負值表示不截斷。
+//
+// 排序是為了讓最該被看到的東西不會剛好被截掉：出事的排最前，接著是快要跑的，
+// 不會再跑的（已停用、只在開機時跑）排最後。同一組內維持 crontab 上的原始順序，
+// 使用者對自己的檔案有記憶。
+//
+// 回傳被略過的筆數而不是只回前 N 筆：安靜地截斷會被讀成「總共就這些」。
 func (status *DesktopStatus) Lines(limit int) ([]vo.JobStatusLine, int) {
-	return []vo.JobStatusLine{}, 0
+	if status.unavailableReason != "" {
+		return []vo.JobStatusLine{}, 0
+	}
+
+	lines := make([]vo.JobStatusLine, 0, len(status.jobs))
+	for _, job := range status.jobs {
+		lines = append(lines, status.buildLine(job))
+	}
+
+	sort.SliceStable(lines, func(leftIndex int, rightIndex int) bool {
+		return status.lessUrgent(lines[leftIndex], lines[rightIndex])
+	})
+
+	if limit > 0 && len(lines) > limit {
+		return lines[:limit], len(lines) - limit
+	}
+
+	return lines, 0
+}
+
+// buildLine 把一個 job 攤平成摘要的一行。
+func (status *DesktopStatus) buildLine(job *CronJob) vo.JobStatusLine {
+	outcome := status.outcomeOf(job)
+
+	line := vo.JobStatusLine{
+		JobID:               job.JobID(),
+		DisplayName:         job.DisplayName(),
+		ScheduleDescription: job.Schedule().Describe(),
+		Enabled:             job.Enabled(),
+		Outcome:             string(outcome),
+		NeedsAttention:      outcome == LatestRunOutcomeFailed,
+	}
+
+	// 已停用或只在開機時跑的 job 沒有下次執行時間。留 nil 而不是零時間 ——
+	// 零時間會被畫成一個看起來很真的日期。
+	if nextRunAt, predictable := job.NextRunAt(status.now); predictable {
+		line.NextRunAt = &nextRunAt
+	}
+
+	return line
+}
+
+// lessUrgent 定義摘要的排序：需要注意的最前，然後是下次執行最近的，沒有下次執行
+// 的最後。
+func (status *DesktopStatus) lessUrgent(leftLine vo.JobStatusLine, rightLine vo.JobStatusLine) bool {
+	if leftLine.NeedsAttention != rightLine.NeedsAttention {
+		return leftLine.NeedsAttention
+	}
+
+	if (leftLine.NextRunAt == nil) != (rightLine.NextRunAt == nil) {
+		return leftLine.NextRunAt != nil
+	}
+
+	if leftLine.NextRunAt == nil {
+		return false
+	}
+
+	return leftLine.NextRunAt.Before(*rightLine.NextRunAt)
 }
 
 // outcomeOf 判定單一 job 的最近一次結果。
