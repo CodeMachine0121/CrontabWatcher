@@ -7,10 +7,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/webview/webview_go"
 )
+
+// macOS 的 NSApplication 必須跑在主執行緒上，而 Go 只保證 main 從主執行緒**開始**
+// ——它之後可能被排到別的執行緒去。沒有這一行，視窗與選單列都會在啟動時死於
+// 「NSApp with wrong _running count」。
+//
+// 對其他子命令沒有副作用：一個伺服器不在乎自己的 main goroutine 綁在哪個執行緒。
+func init() {
+	runtime.LockOSThread()
+}
 
 const windowUsage = `usage: cronwatch window --url=<address>
 
