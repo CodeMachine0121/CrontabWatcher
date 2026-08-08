@@ -127,13 +127,19 @@ func (job *CronJob) RawCommand() string {
 	return job.rawCommand
 }
 
-// InnerCommand 回傳「實際該執行的那道指令」：剝掉 wrapper 與輸出 redirect 之後
-// 的內容。
+// InnerCommand 回傳「實際該執行的那道指令」。
 //
 // 剝掉 wrapper 是必要的 —— 否則手動觸發 managed job 會再次呼叫 wrapper，遞迴下去。
-// 剝掉 redirect 也是必要的 —— 否則輸出在到達我們手上之前就被導走，紀錄會是空的。
+//
+// 尾端的 redirect 也會被剝掉，否則輸出在到達我們手上之前就被導走，紀錄會是空的。
+// 但**位在串接指令中間的 redirect 不剝**（`a && b >> log && c`）：剝掉會讓剩下的
+// 指令變成半條 pipeline，跑起來還像成功了。這種情況下我們寧可拿不到輸出，也要
+// 執行與 cron 完全相同的指令。
 func (job *CronJob) InnerCommand() string {
-	bareCommand, _ := vo.ParseCommandRedirect(job.rawCommand)
+	bareCommand, redirect := vo.ParseCommandRedirect(job.rawCommand)
+	if redirect != nil && !redirect.IsTrailing() {
+		bareCommand = job.rawCommand
+	}
 
 	if matches := wrapperCommandPattern.FindStringSubmatch(bareCommand); matches != nil {
 		return strings.TrimSpace(matches[1])
@@ -184,13 +190,18 @@ func (job *CronJob) Redirect() *vo.CommandRedirect {
 }
 
 // LogSource 判斷這個 job 的輸出能從哪裡讀到。
+//
+// 指令自帶的 redirect 優先於我們管理的 log 檔，納管與否都一樣：輸出實際上就是落在
+// 那個檔案裡。這對「串接指令被 adopt」的情形特別重要 —— 那種 redirect 剝不掉，
+// 所以 wrapper 只拿得到 exit code，真正的輸出仍在使用者原本的檔案。指向我們那個
+// 幾乎空白的 log 只會讓人以為 job 沒有輸出。
 func (job *CronJob) LogSource() LogSource {
-	if job.IsManaged() {
-		return LogSourceManaged
-	}
-
 	if job.redirect != nil && !job.redirect.DiscardsOutput() {
 		return LogSourceRedirect
+	}
+
+	if job.IsManaged() {
+		return LogSourceManaged
 	}
 
 	return LogSourceNone

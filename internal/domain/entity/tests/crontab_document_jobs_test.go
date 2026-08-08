@@ -197,3 +197,35 @@ func TestCrontabDocumentJobsFromRealisticFixture(t *testing.T) {
 
 	assert.False(t, jobs[4].Schedule().IsPredictable(), "@reboot has no next run")
 }
+
+func TestCronJobKeepsAChainedCommandWhole(t *testing.T) {
+	// 取自一份真實的 crontab。手動觸發必須跑「與 cron 完全相同」的指令；跑截斷後
+	// 的前半段會做了 ingest 卻沒做 log 輪替，而且看起來像成功了。
+	chainedCommand := "mkdir -p /var/log/app && cd /srv/app && /usr/local/bin/uv run python -m app.ingest " +
+		">> /var/log/app/ingest.log 2>&1 && tail -n 500 /var/log/app/ingest.log > /tmp/ingest.tmp " +
+		"&& mv /tmp/ingest.tmp /var/log/app/ingest.log"
+
+	jobs := ParseCrontabDocument("5 * * * * " + chainedCommand + "\n").Jobs()
+	require.Len(t, jobs, 1)
+
+	assert.Equal(t, chainedCommand, jobs[0].InnerCommand(),
+		"the command must be executed exactly as cron executes it")
+	assert.Equal(t, LogSourceRedirect, jobs[0].LogSource())
+	assert.Equal(t, "/var/log/app/ingest.log", jobs[0].ResolveLogFilePath(managedLogDirectory),
+		"the first top-level redirect is the log, not the internal temporary file")
+}
+
+func TestCronJobUnwrapsAManagedChainedCommandWithoutTruncatingIt(t *testing.T) {
+	chainedCommand := "/bin/a && /bin/b >> /var/log/b.log 2>&1 && /bin/c"
+
+	jobs := ParseCrontabDocument(
+		"# cronwatch:id=job-1\n0 3 * * * /app/cronwatch run --job=job-1 -- " + chainedCommand + "\n").Jobs()
+	require.Len(t, jobs, 1)
+
+	assert.True(t, jobs[0].IsManaged())
+	assert.Equal(t, chainedCommand, jobs[0].InnerCommand(),
+		"the wrapper is removed but the chain inside it stays intact")
+	assert.Equal(t, LogSourceRedirect, jobs[0].LogSource(),
+		"output lands in the file the chain redirects to, not in our managed log")
+	assert.Equal(t, "/var/log/b.log", jobs[0].ResolveLogFilePath(managedLogDirectory))
+}

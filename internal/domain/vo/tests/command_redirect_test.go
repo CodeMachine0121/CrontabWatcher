@@ -177,3 +177,92 @@ func TestCommandRedirectRawFragmentAllowsExactRestoration(t *testing.T) {
 	assert.Equal(t, command, bareCommand+redirect.RawFragment(),
 		"bare command plus raw fragment must reproduce the original command exactly")
 }
+
+func TestParseCommandRedirectDoesNotTruncateAChainedCommand(t *testing.T) {
+	// 真實世界的 crontab 條目：一串 && 接起來的指令，其中一段自己 redirect 到
+	// log 檔，後面還有 log 輪替。
+	//
+	// 把「第一個 redirect 之後的全部內容」當成 redirect 語法，會造成兩件錯事：
+	// 誤把最後那個內部暫存檔當成 log 位置，以及把指令截斷成前半段 —— 而截斷後的
+	// 指令若被手動觸發，就會只跑一半的 pipeline。
+	command := "mkdir -p /var/log/app && cd /srv/app && /usr/local/bin/uv run python -m app.ingest " +
+		">> /var/log/app/ingest.log 2>&1 && tail -n 500 /var/log/app/ingest.log > /tmp/ingest.tmp " +
+		"&& mv /tmp/ingest.tmp /var/log/app/ingest.log"
+
+	bareCommand, redirect := vo.ParseCommandRedirect(command)
+
+	require.NotNil(t, redirect)
+	assert.Equal(t, command, bareCommand,
+		"a chained command must come back whole; running a truncated pipeline is worse than not running it")
+	assert.False(t, redirect.IsTrailing())
+	assert.Equal(t, "/var/log/app/ingest.log", redirect.TargetFilePath(),
+		"the first top-level redirect is the job's log, not the internal temporary file")
+	assert.True(t, redirect.IncludesStandardError())
+	assert.Equal(t, " >> /var/log/app/ingest.log 2>&1", redirect.RawFragment())
+}
+
+func TestParseCommandRedirectReportsWhetherTheRedirectIsTrailing(t *testing.T) {
+	testCases := []struct {
+		name               string
+		command            string
+		expectedTrailing   bool
+		expectedBare       string
+		expectedTargetPath string
+	}{
+		{
+			name:               "plain trailing redirect",
+			command:            "/bin/x >> /var/log/x.log 2>&1",
+			expectedTrailing:   true,
+			expectedBare:       "/bin/x",
+			expectedTargetPath: "/var/log/x.log",
+		},
+		{
+			name:               "followed by another command",
+			command:            "/bin/x >> /var/log/x.log && /bin/y",
+			expectedTrailing:   false,
+			expectedBare:       "/bin/x >> /var/log/x.log && /bin/y",
+			expectedTargetPath: "/var/log/x.log",
+		},
+		{
+			name:               "followed by a semicolon",
+			command:            "/bin/x > /var/log/x.log ; /bin/y",
+			expectedTrailing:   false,
+			expectedBare:       "/bin/x > /var/log/x.log ; /bin/y",
+			expectedTargetPath: "/var/log/x.log",
+		},
+		{
+			name:               "followed by a pipe",
+			command:            "/bin/x > /var/log/x.log | /bin/y",
+			expectedTrailing:   false,
+			expectedBare:       "/bin/x > /var/log/x.log | /bin/y",
+			expectedTargetPath: "/var/log/x.log",
+		},
+		{
+			name:               "backgrounded after the redirect",
+			command:            "/bin/x >> /var/log/x.log &",
+			expectedTrailing:   false,
+			expectedBare:       "/bin/x >> /var/log/x.log &",
+			expectedTargetPath: "/var/log/x.log",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			bareCommand, redirect := vo.ParseCommandRedirect(testCase.command)
+
+			require.NotNil(t, redirect)
+			assert.Equal(t, testCase.expectedTrailing, redirect.IsTrailing())
+			assert.Equal(t, testCase.expectedBare, bareCommand)
+			assert.Equal(t, testCase.expectedTargetPath, redirect.TargetFilePath())
+		})
+	}
+}
+
+func TestParseCommandRedirectTakesTheFirstTargetNotTheLast(t *testing.T) {
+	// 兩個 redirect 分屬串接中的不同指令。第一個是這個 job 的 log，第二個是它
+	// 內部的暫存檔 —— 拿到最後一個就會讓 UI 顯示錯的檔案。
+	_, redirect := vo.ParseCommandRedirect("/bin/a >> /var/log/first.log && /bin/b > /tmp/second.tmp")
+
+	require.NotNil(t, redirect)
+	assert.Equal(t, "/var/log/first.log", redirect.TargetFilePath())
+}

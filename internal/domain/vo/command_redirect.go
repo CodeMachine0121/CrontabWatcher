@@ -10,6 +10,7 @@ type CommandRedirect struct {
 	appends               bool
 	includesStandardError bool
 	rawFragment           string
+	trailing              bool
 }
 
 // TargetFilePath 回傳輸出被導向的檔案路徑。
@@ -32,6 +33,14 @@ func (redirect *CommandRedirect) IncludesStandardError() bool {
 // 註解裡，才有可能一字不差地還原使用者原本的指令。
 func (redirect *CommandRedirect) RawFragment() string {
 	return redirect.rawFragment
+}
+
+// IsTrailing 回報這個重導向是否位於整道指令的尾端。
+//
+// 為 false 表示它屬於串接指令（`a && b >> log && c`）中的某一段，因此**不能**把它
+// 從指令裡剝掉 —— 剝掉會讓剩下的指令變成半條 pipeline。
+func (redirect *CommandRedirect) IsTrailing() bool {
+	return redirect.trailing
 }
 
 // DiscardsOutput 回報輸出是否被明確丟棄（導向 /dev/null）。這種 job 有 redirect

@@ -12,6 +12,13 @@ import (
 // 掃描時會追蹤引號狀態，因此 `echo 'a > b'` 裡的 > 不會被誤認成重導向 —— 這種
 // 誤判會讓我們去讀一個根本不存在的檔案，並在 UI 上謊報 log 位置。
 //
+// **重導向不一定在指令尾端。** cron 條目常常是 `a && b >> log 2>&1 && c` 這種
+// 串接，其中的重導向屬於串接中的某一段。這種情況下：
+//   - 第一個回傳值是**完整的原指令**，一個字都不切掉。截斷後的指令若被手動觸發，
+//     會只跑一半的 pipeline，那比不跑更糟。
+//   - 重導向仍然回傳（那個檔案確實收得到輸出，是有用的 log），但 IsTrailing()
+//     為 false，呼叫端據此知道不能把它從指令裡剝掉。
+//
 // 若指令沒有把輸出導向任何檔案（包含只寫了 2>&1 的情形），回傳的 redirect 為
 // nil，且第一個回傳值與輸入完全相同。
 func ParseCommandRedirect(command string) (string, *CommandRedirect) {
@@ -20,26 +27,37 @@ func ParseCommandRedirect(command string) (string, *CommandRedirect) {
 		return command, nil
 	}
 
-	bareCommand := strings.TrimRight(command[:redirectStartIndex], " \t")
-	redirectSection := command[len(bareCommand):]
+	commandBeforeRedirect := strings.TrimRight(command[:redirectStartIndex], " \t")
+	redirectSection := command[len(commandBeforeRedirect):]
 
-	targetFilePath, appends, includesStandardError, hasFileTarget := parseRedirectSection(redirectSection)
-	if !hasFileTarget {
+	parsed := parseRedirectSection(redirectSection)
+	if !parsed.hasFileTarget {
 		return command, nil
 	}
 
+	// 消耗完的重導向語法之後若還有非空白內容，代表這是串接指令的一部分，而不是
+	// 整道指令的尾端重導向。
+	isTrailing := strings.TrimSpace(redirectSection[parsed.consumedLength:]) == ""
+
+	bareCommand := commandBeforeRedirect
+	if !isTrailing {
+		bareCommand = command
+	}
+
 	return bareCommand, &CommandRedirect{
-		targetFilePath:        targetFilePath,
-		appends:               appends,
-		includesStandardError: includesStandardError,
-		rawFragment:           redirectSection,
+		targetFilePath:        parsed.targetFilePath,
+		appends:               parsed.appends,
+		includesStandardError: parsed.includesStandardError,
+		rawFragment:           redirectSection[:parsed.consumedLength],
+		trailing:              isTrailing,
 	}
 }
 
 // findRedirectSectionStart 找出第一個位於引號外的重導向運算子起始位置。
 //
-// 取「第一個」而非「最後一個」，是為了讓 `cmd 2>&1 >> /path` 這種把 stderr 合併
-// 寫在前面的形態也能被完整切出來。
+// 取「第一個」而非「最後一個」，有兩個理由：讓 `cmd 2>&1 >> /path` 這種把 stderr
+// 合併寫在前面的形態也能被完整切出來；以及在串接指令裡，最前面那個重導向才是這個
+// job 的 log，後面的多半是它自己的暫存檔。
 func findRedirectSectionStart(command string) (int, bool) {
 	insideSingleQuote := false
 	insideDoubleQuote := false
@@ -90,64 +108,98 @@ func isTokenBoundary(command string, index int) bool {
 	return unicode.IsSpace(rune(command[index-1]))
 }
 
+// parsedRedirectSection 是解析重導向區段的結果。
+type parsedRedirectSection struct {
+	targetFilePath        string
+	appends               bool
+	includesStandardError bool
+	hasFileTarget         bool
+	// consumedLength 是實際被辨識為重導向語法的字元數。之後若還有內容，代表這道
+	// 指令是串接的。
+	consumedLength int
+}
+
 // parseRedirectSection 解析重導向區段，找出實際被寫入的檔案與 stderr 的去向。
 //
+// **遇到第一個不是重導向運算子的 token 就停下來**，而不是掃到字串結尾。掃到底會
+// 讓 `>> log 2>&1 && tail ... > /tmp/tmp` 裡的暫存檔覆蓋掉真正的 log 位置。
+//
 // stdout 的重導向優先作為 log 目標；若只有 stderr 被導向檔案，就用那個檔案。
-func parseRedirectSection(section string) (targetFilePath string, appends bool, includesStandardError bool, hasFileTarget bool) {
+func parseRedirectSection(section string) parsedRedirectSection {
+	result := parsedRedirectSection{}
+
 	standardErrorMergedIntoOutput := false
 	standardErrorTargetFilePath := ""
 	standardErrorAppends := false
 
-	for index := 0; index < len(section); {
-		if unicode.IsSpace(rune(section[index])) {
-			index++
-			continue
+	index := 0
+	for index < len(section) {
+		cursor := index
+		for cursor < len(section) && unicode.IsSpace(rune(section[cursor])) {
+			cursor++
+		}
+		if cursor >= len(section) {
+			break
 		}
 
-		operator, fileDescriptor, operatorLength := readRedirectOperator(section, index)
+		operator, fileDescriptor, operatorLength := readRedirectOperator(section, cursor)
 		if operatorLength == 0 {
-			index++
-			continue
+			break
 		}
 
-		index += operatorLength
+		cursor += operatorLength
 
 		if operator == mergeStandardErrorOperator {
 			standardErrorMergedIntoOutput = true
+			index = cursor
+			result.consumedLength = cursor
 			continue
 		}
 
-		operand, operandLength := readOperand(section, index)
-		index += operandLength
+		operand, operandLength := readOperand(section, cursor)
 		if operand == "" {
-			continue
+			break
 		}
+		cursor += operandLength
 
 		switch fileDescriptor {
 		case standardErrorDescriptor:
-			standardErrorTargetFilePath = operand
-			standardErrorAppends = operator == appendOperator
+			if standardErrorTargetFilePath == "" {
+				standardErrorTargetFilePath = operand
+				standardErrorAppends = operator == appendOperator
+			}
 		case bothStreamsDescriptor:
-			targetFilePath = operand
-			appends = operator == appendOperator
-			hasFileTarget = true
-			includesStandardError = true
+			if !result.hasFileTarget {
+				result.targetFilePath = operand
+				result.appends = operator == appendOperator
+				result.includesStandardError = true
+				result.hasFileTarget = true
+			}
 		default:
-			targetFilePath = operand
-			appends = operator == appendOperator
-			hasFileTarget = true
+			if !result.hasFileTarget {
+				result.targetFilePath = operand
+				result.appends = operator == appendOperator
+				result.hasFileTarget = true
+			}
 		}
+
+		index = cursor
+		result.consumedLength = cursor
 	}
 
-	if hasFileTarget {
-		return targetFilePath, appends, includesStandardError || standardErrorMergedIntoOutput, true
+	if result.hasFileTarget {
+		result.includesStandardError = result.includesStandardError || standardErrorMergedIntoOutput
+		return result
 	}
 
 	if standardErrorTargetFilePath != "" {
-		return standardErrorTargetFilePath, standardErrorAppends, true, true
+		result.targetFilePath = standardErrorTargetFilePath
+		result.appends = standardErrorAppends
+		result.includesStandardError = true
+		result.hasFileTarget = true
 	}
 
-	return "", false, false, false
+	return result
 }
 
 type redirectOperator int

@@ -120,11 +120,15 @@ func (document *CrontabDocument) SetJobEnabled(jobID string, enabled bool) error
 	return nil
 }
 
-// AdoptJob 把一筆 foreign job 轉為納管：補上 marker、把指令包成 wrapper，並剝離
-// 原本的輸出 redirect。
+// AdoptJob 把一筆 foreign job 轉為納管：補上 marker、把指令包成 wrapper，並在安全
+// 的前提下剝離原本的輸出 redirect。
 //
-// 剝離 redirect 是必要的 —— 若保留，stdout 在到達 wrapper 之前就被導走，紀錄會
-// 是空的，那比沒有紀錄更糟。被剝離的片段記在 marker 註解裡以便還原。
+// 剝離尾端的 redirect 是必要的 —— 若保留，stdout 在到達 wrapper 之前就被導走，
+// 紀錄會是空的，那比沒有紀錄更糟。被剝離的片段記在 marker 註解裡以便還原。
+//
+// **串接指令中間的 redirect 不剝**（`a && b >> log && c`）：剝掉會留下半條
+// pipeline。這種 job adopt 之後仍然有真正的 exit code 可記，只是輸出還在使用者
+// 原本的檔案裡 —— 那是這兩害之中明顯較輕的。
 func (document *CrontabDocument) AdoptJob(jobID string, managedJobID string, wrapperBinaryPath string) (*CronJob, error) {
 	job, err := document.MustFindJob(jobID)
 	if err != nil {
@@ -136,6 +140,11 @@ func (document *CrontabDocument) AdoptJob(jobID string, managedJobID string, wra
 	}
 
 	bareCommand, redirect := vo.ParseCommandRedirect(job.RawCommand())
+	if redirect != nil && !redirect.IsTrailing() {
+		bareCommand = job.RawCommand()
+		redirect = nil
+	}
+
 	lineIndex := job.LineIndex()
 	lineTerminator := document.lines[lineIndex].LineTerminator()
 	if lineTerminator == "" {

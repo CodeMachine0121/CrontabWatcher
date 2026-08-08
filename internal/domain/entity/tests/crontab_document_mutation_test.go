@@ -402,3 +402,22 @@ func TestCrontabDocumentForeignIdentifierIsStableAcrossDisabling(t *testing.T) {
 	require.NoError(t, document.SetJobEnabled(originalJobID, true))
 	assert.Equal(t, originalJobID, document.Jobs()[0].JobID())
 }
+
+func TestCrontabDocumentAdoptJobKeepsANonTrailingRedirectInPlace(t *testing.T) {
+	// 串接指令中間的 redirect 剝不掉 —— 剝掉會留下半條 pipeline。所以 adopt 只是
+	// 包上 wrapper：從此有真正的 exit code，輸出仍然落在使用者原本的檔案裡。
+	chainedCommand := "/bin/a && /bin/b >> /var/log/b.log 2>&1 && /bin/c"
+	document := ParseCrontabDocument("0 3 * * * " + chainedCommand + "\n")
+	foreignJobID := document.Jobs()[0].JobID()
+
+	adoptedJob, err := document.AdoptJob(foreignJobID, "job-1", wrapperBinaryPath)
+	require.NoError(t, err)
+
+	assert.Equal(t,
+		"# cronwatch:id=job-1\n"+
+			"0 3 * * * /app/cronwatch run --job=job-1 -- "+chainedCommand+"\n",
+		document.Render(),
+		"no stripped-redirect marker, because nothing could safely be stripped")
+	assert.Empty(t, adoptedJob.StrippedRedirect())
+	assert.Equal(t, chainedCommand, adoptedJob.InnerCommand())
+}
