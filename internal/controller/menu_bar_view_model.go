@@ -12,13 +12,24 @@ import (
 // 幾十個字元，而使用者關心的是「今天幾點」。
 const menuTimeLayout = "01/02 15:04"
 
-// 選單列圖示的三態。刻意用形狀不同的符號而不是顏色 —— 顏色在深色模式、在色覺
-// 差異下都可能失效，而這是整個功能唯一「不點開就看得到」的資訊。
+// 選單列上圖示旁邊的字。
+//
+// 一切正常時什麼都不加——那是絕大多數的時候，而一個乾淨的圖示就是使用者要的。
+// 有事的時候才補一個字元，讓那一格看起來與平常不同，眼睛才會被抓過去。
+//
+// 刻意用形狀不同的字元而不是顏色：顏色在深色模式、在色覺差異下都可能失效，而
+// 這是整個功能唯一「不點開就看得到」的資訊。
 const (
-	indicatorTitleNormal      = "cw ✓"
-	indicatorTitleAttention   = "cw !"
-	indicatorTitleUnavailable = "cw ?"
+	indicatorTitleNormal      = ""
+	indicatorTitleAttention   = "!"
+	indicatorTitleUnavailable = "?"
 )
+
+// indicatorTitleTextFallback 是畫不出圖示時的前綴。
+//
+// 沒有它，正常狀態會是「沒有圖示、也沒有文字」——一個看不見的選單列項目，比什麼
+// 都糟。
+const indicatorTitleTextFallback = "cw"
 
 // 最近一次結果的符號。四種結果各自不同，「無從得知」尤其不能長得像成功。
 const (

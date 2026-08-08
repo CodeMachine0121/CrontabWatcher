@@ -27,6 +27,7 @@ type MenuBarController struct {
 	refreshInterval time.Duration
 	summaryCapacity int
 
+	hasIcon       bool
 	lineItems     []*systray.MenuItem
 	lineJobIDs    []string
 	overflowItem  *systray.MenuItem
@@ -67,7 +68,16 @@ func (controller *MenuBarController) Run() {
 
 // onReady 建立選單，並開始定期重新確認現況。
 func (controller *MenuBarController) onReady() {
-	systray.SetTitle(indicatorTitleNormal)
+	// 圖示先設，標題後設：正常狀態的標題是空字串，若此時還沒有圖示，那一格就
+	// 是完全空白的，使用者會以為 app 沒起來。
+	if icon := MenuBarIconPNG(); len(icon) > 0 {
+		systray.SetTemplateIcon(icon, icon)
+		controller.hasIcon = true
+	} else {
+		log.Printf("could not draw the menu bar icon; showing text instead")
+	}
+
+	systray.SetTitle(controller.indicatorText(indicatorTitleNormal))
 	systray.SetTooltip("crontab-watcher")
 
 	// 選單項目在 macOS 上無法動態增刪，因此一次建滿上限再靠顯示／隱藏切換。
@@ -153,7 +163,7 @@ func (controller *MenuBarController) refreshNow() {
 
 // render 把 view model 畫到選單上。
 func (controller *MenuBarController) render(viewModel MenuBarViewModel) {
-	systray.SetTitle(viewModel.IndicatorTitle)
+	systray.SetTitle(controller.indicatorText(viewModel.IndicatorTitle))
 	systray.SetTooltip(viewModel.Tooltip)
 
 	for index, item := range controller.lineItems {
@@ -171,6 +181,18 @@ func (controller *MenuBarController) render(viewModel MenuBarViewModel) {
 
 	controller.setItemText(controller.emptyItem, viewModel.EmptyMessage)
 	controller.setItemText(controller.overflowItem, viewModel.OverflowTitle)
+}
+
+// indicatorText 是圖示旁邊要放的字。
+//
+// 有圖示時就照原樣（正常狀態是空字串，只留圖示）；畫不出圖示時補上前綴，否則
+// 那一格會完全看不見。
+func (controller *MenuBarController) indicatorText(indicatorTitle string) string {
+	if controller.hasIcon {
+		return indicatorTitle
+	}
+
+	return indicatorTitleTextFallback + indicatorTitle
 }
 
 // setItemText 有字就顯示，沒字就隱藏。

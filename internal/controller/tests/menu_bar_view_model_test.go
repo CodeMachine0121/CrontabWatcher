@@ -30,8 +30,11 @@ func statusWithLines(indicator entity.StatusIndicator, lines ...dto.JobStatusLin
 	return dto.DesktopStatusDto{Indicator: string(indicator), Lines: lines}
 }
 
-// 圖示是整個功能唯一「不點開就看得到」的資訊，三種狀態必須用形狀分得開，不能
-// 只靠顏色 —— 深色模式與色覺差異都會讓顏色失效。
+// 選單列是整個功能唯一「不點開就看得到」的地方，三種狀態必須分得開，而且要靠
+// 形狀而不是顏色 —— 深色模式與色覺差異都會讓顏色失效。
+//
+// 正常狀態刻意不加任何字：那是絕大多數的時候，乾淨的圖示就夠了。有事時才補一個
+// 字元，讓那一格看起來與平常不同。
 func TestMenuBarViewModelDistinguishesTheThreeIndicators(t *testing.T) {
 	normal := controller.NewMenuBarViewModel(statusWithLines(entity.StatusIndicatorNormal))
 	attention := controller.NewMenuBarViewModel(statusWithLines(entity.StatusIndicatorAttention))
@@ -41,6 +44,9 @@ func TestMenuBarViewModelDistinguishesTheThreeIndicators(t *testing.T) {
 	titles := []string{normal.IndicatorTitle, attention.IndicatorTitle, unavailable.IndicatorTitle}
 
 	assert.Len(t, uniqueValues(titles), 3, "the three states must not look alike")
+	assert.Empty(t, normal.IndicatorTitle, "a normal state adds nothing next to the icon")
+	assert.NotEmpty(t, attention.IndicatorTitle, "something needing attention must be visible without opening anything")
+	assert.NotEmpty(t, unavailable.IndicatorTitle)
 	assert.Contains(t, unavailable.Tooltip, "permission denied")
 	assert.NotContains(t, normal.Tooltip, "沒有跑成功",
 		"a normal state must not describe failures that are not there")
