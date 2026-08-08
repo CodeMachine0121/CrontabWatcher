@@ -65,7 +65,63 @@ func TestCrontabDocumentAppendManagedJobWithDescription(t *testing.T) {
 	_, err := document.AppendManagedJob("job-1", mustBuildSpecification(t, "@daily", "/bin/x", "nightly rotate"))
 	require.NoError(t, err)
 
-	assert.Equal(t, "# nightly rotate\n# cronwatch:id=job-1\n@daily /app/cronwatch run --job=job-1 -- /bin/x\n",
+	// 說明存成 marker 而不是普通註解：普通註解判不出所有權，刪除 job 時就只能
+	// 留著它變成孤兒。
+	assert.Equal(t, "# cronwatch:id=job-1\n# cronwatch:description=nightly rotate\n@daily /app/cronwatch run --job=job-1 -- /bin/x\n",
+		document.Render())
+	assert.Equal(t, "nightly rotate", document.Jobs()[0].Description())
+}
+
+func TestCrontabDocumentRemoveJobTakesItsDescriptionWithIt(t *testing.T) {
+	document := ParseCrontabDocument("# a note the user wrote\n0 9 * * * /bin/other\n")
+
+	created, err := document.AppendManagedJob("job-1", mustBuildSpecification(t, "0 3 * * *", "/bin/x", "nightly"))
+	require.NoError(t, err)
+	require.NoError(t, document.RemoveJob(created.JobID()))
+
+	assert.Equal(t, "# a note the user wrote\n0 9 * * * /bin/other\n", document.Render(),
+		"our own description marker goes with the job; the user's own comment stays")
+}
+
+func TestCrontabDocumentReplaceJobUpdatesTheDescription(t *testing.T) {
+	document := ParseCrontabDocument("")
+
+	_, err := document.AppendManagedJob("job-1", mustBuildSpecification(t, "0 3 * * *", "/bin/x", "original"))
+	require.NoError(t, err)
+
+	_, err = document.ReplaceJob("job-1", mustBuildSpecification(t, "0 3 * * *", "/bin/x", "revised"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "# cronwatch:id=job-1\n# cronwatch:description=revised\n0 3 * * * /app/cronwatch run --job=job-1 -- /bin/x\n",
+		document.Render())
+	assert.Equal(t, "revised", document.Jobs()[0].Description())
+}
+
+func TestCrontabDocumentReplaceJobCanClearTheDescription(t *testing.T) {
+	// 清空說明要真的把那行拿掉，否則檔案裡會留著一行空說明。
+	document := ParseCrontabDocument("")
+
+	_, err := document.AppendManagedJob("job-1", mustBuildSpecification(t, "0 3 * * *", "/bin/x", "original"))
+	require.NoError(t, err)
+
+	_, err = document.ReplaceJob("job-1", mustBuildSpecification(t, "0 3 * * *", "/bin/x", ""))
+	require.NoError(t, err)
+
+	assert.Equal(t, "# cronwatch:id=job-1\n0 3 * * * /app/cronwatch run --job=job-1 -- /bin/x\n",
+		document.Render())
+	assert.Empty(t, document.Jobs()[0].Description())
+}
+
+func TestCrontabDocumentReplaceJobAddsADescriptionThatWasNotThere(t *testing.T) {
+	document := ParseCrontabDocument("")
+
+	_, err := document.AppendManagedJob("job-1", mustBuildSpecification(t, "0 3 * * *", "/bin/x", ""))
+	require.NoError(t, err)
+
+	_, err = document.ReplaceJob("job-1", mustBuildSpecification(t, "0 3 * * *", "/bin/x", "added later"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "# cronwatch:id=job-1\n# cronwatch:description=added later\n0 3 * * * /app/cronwatch run --job=job-1 -- /bin/x\n",
 		document.Render())
 }
 

@@ -1,0 +1,38 @@
+{{define "runTable"}}
+{{if .RunList.UnavailableReason}}
+<p class="empty-state">
+    沒有逐次執行紀錄。
+    <span class="muted">{{.RunList.UnavailableReason}}</span>
+</p>
+{{else if not .RunList.Runs}}
+<p class="empty-state">還沒有任何執行紀錄。<span class="muted">下次排程觸發或手動執行後就會出現。</span></p>
+{{else}}
+<table class="run-table">
+    <thead>
+    <tr>
+        <th class="column-status"></th>
+        <th>開始</th>
+        <th>耗時</th>
+        <th>exit</th>
+        <th>觸發</th>
+        <th>輸出摘要</th>
+    </tr>
+    </thead>
+    <tbody>
+    {{range .RunList.Runs}}
+    <tr>
+        <td class="column-status"><span class="lamp lamp-{{.RunStatus}}" title="{{.RunStatus}}"></span></td>
+        <td>{{formatTime .StartedAt}}</td>
+        <td>{{formatDuration .DurationMilliseconds}}</td>
+        <td class="mono">{{formatExitCode .ExitCode}}</td>
+        <td>{{.TriggerSource}}</td>
+        <td class="excerpt-cell">
+            {{if .OutputExcerpt}}<pre class="excerpt">{{.OutputExcerpt}}</pre>{{else}}<span class="muted">（無輸出）</span>{{end}}
+            {{if .OutputTruncated}}<span class="muted">摘要已截斷，完整內容見下方輸出</span>{{end}}
+        </td>
+    </tr>
+    {{end}}
+    </tbody>
+</table>
+{{end}}
+{{end}}

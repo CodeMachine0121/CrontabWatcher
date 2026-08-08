@@ -1,0 +1,19 @@
+{{define "logView"}}
+{{if .LogUnavailableReason}}
+<p class="empty-state">
+    沒有 log 可讀。
+    <span class="muted">{{.LogUnavailableReason}}</span>
+</p>
+{{else if not .Log.Exists}}
+<p class="empty-state">
+    log 檔還不存在。
+    <span class="muted">這個 job 應該還沒跑過。檔案：<span class="mono">{{.Log.FilePath}}</span></span>
+</p>
+{{else if not .Log.Content}}
+<p class="empty-state">log 檔存在但是空的。<span class="muted">跑過，但沒有產生任何輸出。</span></p>
+{{else}}
+{{if .Log.Truncated}}<p class="notice notice-compact">內容過大，以下只顯示檔案尾端。</p>{{end}}
+<pre class="log-content">{{.Log.Content}}</pre>
+<p class="muted log-meta">最後 {{.Log.LineCount}} 行 · {{.Log.FilePath}}</p>
+{{end}}
+{{end}}

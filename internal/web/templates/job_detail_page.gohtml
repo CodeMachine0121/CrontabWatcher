@@ -1,0 +1,63 @@
+{{define "content"}}
+<nav class="breadcrumb"><a href="/">← 全部 cronjob</a></nav>
+
+<section class="panel">
+    <div class="panel-header">
+        <h1>{{.Job.ScheduleDescription}}</h1>
+        <span class="badge badge-{{.Job.Origin}}" title="{{originTitle .Job.Origin}}">{{originLabel .Job.Origin}}</span>
+        {{if not .Job.Enabled}}<span class="badge badge-disabled">已停用</span>{{end}}
+    </div>
+
+    <dl class="job-facts">
+        {{if .Job.Description}}<dt>說明</dt><dd>{{.Job.Description}}</dd>{{end}}
+        <dt>排程</dt><dd class="mono">{{.Job.ScheduleOriginalExpression}}{{if ne .Job.ScheduleOriginalExpression .Job.ScheduleExpression}} <span class="muted">→ {{.Job.ScheduleExpression}}</span>{{end}}</dd>
+        <dt>下次執行</dt><dd>{{formatTime .Job.NextRunAt}}{{if not .Job.NextRunPredictable}} <span class="muted">（此排程沒有可預測的下次執行）</span>{{end}}</dd>
+        <dt>指令</dt><dd class="mono">{{.Job.Command}}</dd>
+        <dt>crontab 原文</dt><dd class="mono muted">第 {{.Job.LineNumber}} 行：{{.Job.ScheduleOriginalExpression}} {{.Job.RawCommand}}</dd>
+        <dt>輸出位置</dt><dd class="mono">{{if .Job.LogFilePath}}{{.Job.LogFilePath}}{{else}}<span class="muted">無 —— 輸出沒有被導向任何檔案</span>{{end}}</dd>
+    </dl>
+
+    <div class="job-actions">
+        {{if .ManualTriggerEnabled}}
+        <button onclick="postAction('/jobs/{{.Job.JobID}}/run', 'POST')">立即執行一次</button>
+        {{end}}
+        {{if .WriteEnabled}}
+            {{if .Job.Enabled}}
+            <button onclick="postAction('/jobs/{{.Job.JobID}}/disable', 'POST')">停用</button>
+            {{else}}
+            <button onclick="postAction('/jobs/{{.Job.JobID}}/enable', 'POST')">啟用</button>
+            {{end}}
+            {{if eq .Job.Origin "foreign"}}
+            <button onclick="adoptJob('{{.Job.JobID}}', '{{.Job.LogFilePath}}')">轉為納管</button>
+            {{end}}
+            <button class="danger" onclick="deleteJob('{{.Job.JobID}}')">刪除</button>
+        {{end}}
+    </div>
+
+    {{if eq .Job.Origin "foreign"}}
+    <p class="notice">
+        這個 job 是手寫的，不由 crontab-watcher 納管：cron 觸發它時不經過我們的
+        wrapper，因此<strong>沒有 exit code、也無法切分逐次執行</strong>。
+        {{if .Job.LogFilePath}}下方顯示的是它自己 redirect 到 <span class="mono">{{.Job.LogFilePath}}</span> 的原始內容。{{end}}
+        另外，它的識別碼是由排程與指令算出來的，<strong>條目一被編輯就會改變</strong>，舊的執行紀錄會失去關聯。
+    </p>
+    {{end}}
+</section>
+
+<section class="panel">
+    <div class="panel-header"><h2>執行歷史</h2></div>
+    <div id="run-table" data-poll-url="/fragments/jobs/{{.Job.JobID}}/runs" data-poll-interval="10000">
+        {{template "runTable" .}}
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <h2>輸出</h2>
+        {{if .Log}}<span class="muted mono">{{.Log.FilePath}}</span>{{end}}
+    </div>
+    <div id="log-view" data-poll-url="/fragments/jobs/{{.Job.JobID}}/log" data-poll-interval="10000">
+        {{template "logView" .}}
+    </div>
+</section>
+{{end}}

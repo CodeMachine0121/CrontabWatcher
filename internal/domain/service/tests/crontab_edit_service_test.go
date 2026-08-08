@@ -62,12 +62,13 @@ func TestCreateCronJobWritesAManagedEntry(t *testing.T) {
 	assert.Equal(t, "/bin/backup.sh", jobDto.Command)
 	assert.Equal(t, "managed", jobDto.LogSource)
 	assert.Equal(t, "/data/logs/job-new.log", jobDto.LogFilePath)
+	assert.Equal(t, "nightly", jobDto.Description)
 	require.NotNil(t, jobDto.NextRunAt)
 
 	assert.Equal(t,
 		"0 9 * * * /bin/existing\n"+
-			"# nightly\n"+
 			"# cronwatch:id=job-new\n"+
+			"# cronwatch:description=nightly\n"+
 			"0 3 * * * /app/cronwatch run --job=job-new -- /bin/backup.sh\n",
 		*fixture.savedContent)
 }

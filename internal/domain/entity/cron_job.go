@@ -71,6 +71,7 @@ type CronJob struct {
 	origin           JobOrigin
 	enabled          bool
 	strippedRedirect string
+	description      string
 	lineIndex        int
 }
 
@@ -83,6 +84,7 @@ func NewCronJob(
 	origin JobOrigin,
 	enabled bool,
 	strippedRedirect string,
+	description string,
 	lineIndex int,
 ) *CronJob {
 	_, redirect := vo.ParseCommandRedirect(rawCommand)
@@ -95,6 +97,7 @@ func NewCronJob(
 		origin:           NewJobOrigin(string(origin)),
 		enabled:          enabled,
 		strippedRedirect: strippedRedirect,
+		description:      description,
 		lineIndex:        lineIndex,
 	}
 }
@@ -157,6 +160,12 @@ func (job *CronJob) Enabled() bool {
 // StrippedRedirect 回傳 adopt 時被剝離、記在 marker 註解裡的原始 redirect 片段。
 func (job *CronJob) StrippedRedirect() string {
 	return job.strippedRedirect
+}
+
+// Description 回傳使用者為這個 job 寫的說明。只有納管的 job 才會有 —— 手寫條目
+// 旁邊的註解無法可靠判定是否屬於它。
+func (job *CronJob) Description() string {
+	return job.description
 }
 
 // LineNumber 回傳這個條目在 crontab 檔案中的行號（1-based），供 UI 對照原檔。

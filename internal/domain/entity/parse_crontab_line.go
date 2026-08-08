@@ -10,15 +10,16 @@ import (
 // markerPrefix 是本服務寫入 crontab 的註解前綴。
 const markerPrefix = "cronwatch:"
 
-// MarkerKeyIdentifier 與 MarkerKeyStrippedRedirect 是目前使用的兩種 marker。
+// 目前使用的 marker 種類。全部都是「我們寫的、屬於下一個條目」的中介資料。
 const (
 	MarkerKeyIdentifier       = "id"
 	MarkerKeyStrippedRedirect = "strippedRedirect"
+	MarkerKeyDescription      = "description"
 )
 
 var (
 	environmentLinePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
-	markerLinePattern      = regexp.MustCompile(`^#\s*` + markerPrefix + `(id|strippedRedirect)=(.*)$`)
+	markerLinePattern      = regexp.MustCompile(`^#\s*` + markerPrefix + `(id|strippedRedirect|description)=(.*)$`)
 )
 
 // ClassifyCrontabLine 判斷一行的種類。這是無狀態的純文字轉換，故為 package-level

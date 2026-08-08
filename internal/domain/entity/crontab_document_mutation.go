@@ -17,13 +17,16 @@ func (document *CrontabDocument) AppendManagedJob(jobID string, specification Ma
 	lineTerminator := document.dominantLineTerminator()
 	appendedLines := make([]vo.CrontabLine, 0, 3)
 
-	if specification.Description() != "" {
-		appendedLines = append(appendedLines, vo.NewCrontabLine(
-			"# "+specification.Description(), lineTerminator, vo.CrontabLineKindComment))
-	}
-
 	appendedLines = append(appendedLines, vo.NewCrontabLine(
 		buildMarkerLine(MarkerKeyIdentifier, jobID), lineTerminator, vo.CrontabLineKindMarker))
+
+	// 說明寫成 marker，而不是普通註解。普通註解無法判定所有權，刪除 job 時就只能
+	// 留著它變成孤兒 —— 而它明明是我們寫的。
+	if specification.Description() != "" {
+		appendedLines = append(appendedLines, vo.NewCrontabLine(
+			buildMarkerLine(MarkerKeyDescription, specification.Description()),
+			lineTerminator, vo.CrontabLineKindMarker))
+	}
 
 	entryText := buildEntryText(
 		specification.Schedule().OriginalExpression(),
@@ -57,23 +60,28 @@ func (document *CrontabDocument) ReplaceJob(jobID string, specification ManagedJ
 	lineIndex := existingJob.LineIndex()
 	document.lines[lineIndex] = document.lines[lineIndex].WithRawText(entryText, entryKind(specification.Enabled()))
 
+	// 只有納管的 job 有 marker 區塊可以放說明；手寫條目不動它的周邊。
+	if existingJob.IsManaged() {
+		document.setDescriptionMarker(lineIndex, specification.Description())
+	}
+
 	return document.MustFindJob(document.identifierAtLine(lineIndex, jobID))
 }
 
-// RemoveJob 移除一筆 job 的條目行，以及緊鄰其上的 marker 註解行。
+// RemoveJob 移除一筆 job 的條目行，以及緊鄰其上的整個 marker 區塊。
 //
-// 刻意不移除使用者自己寫的說明註解 —— 無法可靠判斷那行註解是屬於這個 job 還是
-// 下一個，猜錯就是刪掉別人的文件。
+// 刻意不移除使用者自己寫的**普通**註解 —— 無法可靠判斷那行是屬於這個 job 還是
+// 下一個，猜錯就是刪掉別人的文件。我們自己寫的說明存成 marker，正因為那樣才判得
+// 出所有權、才能一起帶走。
 func (document *CrontabDocument) RemoveJob(jobID string) error {
 	job, err := document.MustFindJob(jobID)
 	if err != nil {
 		return err
 	}
 
-	removalStartIndex := job.LineIndex()
-	for removalStartIndex > 0 && document.lines[removalStartIndex-1].Kind() == vo.CrontabLineKindMarker {
-		removalStartIndex--
-	}
+	// 連同緊鄰其上的整個 marker 區塊一起移除 —— 那些行（識別碼、說明、被剝離的
+	// redirect）全都是我們寫的。使用者自己的說明註解不在這個區塊裡，因此不受影響。
+	removalStartIndex := document.markerBlockStart(job.LineIndex())
 
 	document.lines = append(
 		document.lines[:removalStartIndex],
@@ -152,6 +160,45 @@ func (document *CrontabDocument) AdoptJob(jobID string, managedJobID string, wra
 	document.lines = insertLines(document.lines, lineIndex, markerLines)
 
 	return document.MustFindJob(managedJobID)
+}
+
+// setDescriptionMarker 在條目之上的 marker 區塊裡設定、更新或移除說明 marker。
+//
+// 說明是可有可無的，所以三種情況都要處理：新增、改寫、清空。清空時要真的把那行
+// 拿掉，否則使用者刪掉說明之後檔案裡還留著一行空說明。
+func (document *CrontabDocument) setDescriptionMarker(lineIndex int, description string) {
+	blockStart := document.markerBlockStart(lineIndex)
+
+	existingIndex := -1
+	for cursor := blockStart; cursor < lineIndex; cursor++ {
+		markerKey, _, isMarker := ParseMarkerLine(document.lines[cursor].RawText())
+		if isMarker && markerKey == MarkerKeyDescription {
+			existingIndex = cursor
+			break
+		}
+	}
+
+	if description == "" {
+		if existingIndex >= 0 {
+			document.lines = append(document.lines[:existingIndex], document.lines[existingIndex+1:]...)
+		}
+		return
+	}
+
+	markerText := buildMarkerLine(MarkerKeyDescription, description)
+
+	if existingIndex >= 0 {
+		document.lines[existingIndex] = document.lines[existingIndex].WithRawText(markerText, vo.CrontabLineKindMarker)
+		return
+	}
+
+	lineTerminator := document.lines[lineIndex].LineTerminator()
+	if lineTerminator == "" {
+		lineTerminator = document.dominantLineTerminator()
+	}
+
+	document.lines = insertLines(document.lines, lineIndex,
+		[]vo.CrontabLine{vo.NewCrontabLine(markerText, lineTerminator, vo.CrontabLineKindMarker)})
 }
 
 // ensureFinalLineIsTerminated 為原本沒有行尾的最後一行補上行尾，避免新內容被

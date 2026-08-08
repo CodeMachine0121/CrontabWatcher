@@ -331,12 +331,13 @@ func TestCreateCronJobWalksTheWholeStack(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "job-new", jobDto.JobID)
 	assert.Equal(t, "managed", jobDto.Origin)
+	assert.Equal(t, "nightly", jobDto.Description)
 
 	assert.Equal(t,
 		"# existing\n"+
 			"0 9 * * * /bin/existing\n"+
-			"# nightly\n"+
 			"# cronwatch:id=job-new\n"+
+			"# cronwatch:description=nightly\n"+
 			"0 3 * * * /app/cronwatch run --job=job-new -- /bin/backup.sh\n",
 		savedContent,
 		"the pre-existing lines must come through byte for byte")

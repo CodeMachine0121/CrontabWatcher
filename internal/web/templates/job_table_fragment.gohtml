@@ -1,0 +1,65 @@
+{{define "jobTable"}}
+{{if not .Jobs}}
+<p class="empty-state">
+    這份 crontab 裡沒有任何排程條目。
+    <span class="muted">檔案：{{.CrontabFilePath}}</span>
+</p>
+{{else}}
+<table class="job-table">
+    <thead>
+    <tr>
+        <th class="column-status" title="最近一次執行結果"></th>
+        <th>排程</th>
+        <th>指令</th>
+        <th>下次執行</th>
+        <th>輸出</th>
+        <th>最近執行</th>
+        <th class="column-actions"></th>
+    </tr>
+    </thead>
+    <tbody>
+    {{range .Jobs}}
+    <tr class="{{if not .Enabled}}row-disabled{{end}}">
+        <td class="column-status">
+            <span class="lamp lamp-{{runStatusClass .LatestRun}}" title="{{runStatusTitle .LatestRun}}"></span>
+        </td>
+        <td>
+            <a class="schedule" href="/jobs/{{.JobID}}/detail">{{.ScheduleDescription}}</a>
+            <span class="muted mono">{{.ScheduleOriginalExpression}}</span>
+            {{if .Description}}<span class="job-description">{{.Description}}</span>{{end}}
+            {{if not .Enabled}}<span class="badge badge-disabled">已停用</span>{{end}}
+        </td>
+        <td class="mono command-cell" title="{{.RawCommand}}">{{.Command}}</td>
+        <td>{{formatTime .NextRunAt}}</td>
+        <td>
+            <span class="badge badge-{{.LogSource}}" title="{{logSourceTitle .LogSource}}">{{logSourceLabel .LogSource}}</span>
+        </td>
+        <td>
+            {{if .LatestRun}}
+                <span title="{{formatTime .LatestRun.FinishedAt}}">{{formatTime .LatestRun.StartedAt}}</span>
+                <span class="muted">{{formatDuration .LatestRun.DurationMilliseconds}}</span>
+            {{else if eq .Origin "managed"}}
+                <span class="muted">尚未執行</span>
+            {{else}}
+                <span class="muted" title="未納管的 job 由 cron 觸發時不留紀錄">無紀錄</span>
+            {{end}}
+        </td>
+        <td class="column-actions">
+            <a class="action" href="/jobs/{{.JobID}}/detail">詳情</a>
+            {{if $.ManualTriggerEnabled}}
+            <button class="action" onclick="postAction('/jobs/{{.JobID}}/run', 'POST')">執行</button>
+            {{end}}
+            {{if $.WriteEnabled}}
+                {{if .Enabled}}
+                <button class="action" onclick="postAction('/jobs/{{.JobID}}/disable', 'POST')">停用</button>
+                {{else}}
+                <button class="action" onclick="postAction('/jobs/{{.JobID}}/enable', 'POST')">啟用</button>
+                {{end}}
+            {{end}}
+        </td>
+    </tr>
+    {{end}}
+    </tbody>
+</table>
+{{end}}
+{{end}}

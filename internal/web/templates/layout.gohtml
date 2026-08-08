@@ -1,0 +1,29 @@
+{{define "layout"}}<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.PageTitle}} · crontab-watcher</title>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="page-header">
+    <a class="brand" href="/">crontab-watcher</a>
+    <div class="header-meta">
+        <span class="crontab-path" title="crontab file being watched">{{.CrontabFilePath}}</span>
+        <span class="timezone-badge" title="timezone used for next run times">{{.TimeZoneName}}</span>
+        {{if not .WriteEnabled}}<span class="badge badge-readonly" title="CRONTAB_WRITE_ENABLED is false">read only</span>{{end}}
+    </div>
+</header>
+
+<main>
+    {{template "content" .}}
+</main>
+
+<footer class="page-footer">
+    <span>changes to the crontab take effect within a minute — cron reloads on its own</span>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>{{end}}

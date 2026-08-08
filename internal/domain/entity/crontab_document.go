@@ -124,13 +124,13 @@ func (document *CrontabDocument) buildJob(
 		return nil
 	}
 
-	markerIdentifier, strippedRedirect := document.readMarkersAbove(lineIndex)
+	markers := document.readMarkersAbove(lineIndex)
 
 	origin := JobOriginForeign
 	jobID := DeriveForeignJobIdentifier(schedule.Expression(), command)
-	if markerIdentifier != "" {
+	if markers[MarkerKeyIdentifier] != "" {
 		origin = JobOriginManaged
-		jobID = markerIdentifier
+		jobID = markers[MarkerKeyIdentifier]
 	}
 
 	seenIdentifierCounts[jobID]++
@@ -140,14 +140,17 @@ func (document *CrontabDocument) buildJob(
 		jobID = jobID + "-" + strconv.Itoa(occurrence)
 	}
 
-	return NewCronJob(jobID, schedule, command, origin, enabled, strippedRedirect, lineIndex)
+	return NewCronJob(jobID, schedule, command, origin, enabled,
+		markers[MarkerKeyStrippedRedirect], markers[MarkerKeyDescription], lineIndex)
 }
 
-// readMarkersAbove 往上讀取緊鄰的 marker 註解。
+// readMarkersAbove 往上讀取緊鄰的 marker 註解，回傳 key 到值的對映。
 //
 // 只認「連續緊鄰」的 marker：marker 與條目之間一旦夾了別的內容，就不再視為屬於
 // 該條目。寧可少認一個 managed job，也不要把識別碼錯配到別人的條目上。
-func (document *CrontabDocument) readMarkersAbove(lineIndex int) (markerIdentifier string, strippedRedirect string) {
+func (document *CrontabDocument) readMarkersAbove(lineIndex int) map[string]string {
+	markers := make(map[string]string, 3)
+
 	for cursor := lineIndex - 1; cursor >= 0; cursor-- {
 		line := document.lines[cursor]
 		if line.Kind() != vo.CrontabLineKindMarker {
@@ -159,15 +162,20 @@ func (document *CrontabDocument) readMarkersAbove(lineIndex int) (markerIdentifi
 			break
 		}
 
-		switch markerKey {
-		case MarkerKeyIdentifier:
-			markerIdentifier = markerValue
-		case MarkerKeyStrippedRedirect:
-			strippedRedirect = markerValue
-		}
+		markers[markerKey] = markerValue
 	}
 
-	return markerIdentifier, strippedRedirect
+	return markers
+}
+
+// markerBlockStart 找出緊鄰某條目之上的連續 marker 區塊的起始索引。
+func (document *CrontabDocument) markerBlockStart(lineIndex int) int {
+	blockStart := lineIndex
+	for blockStart > 0 && document.lines[blockStart-1].Kind() == vo.CrontabLineKindMarker {
+		blockStart--
+	}
+
+	return blockStart
 }
 
 // FindJob 依識別碼取出 job。

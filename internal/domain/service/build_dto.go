@@ -22,6 +22,7 @@ func buildCronJobDto(
 		JobID:                      job.JobID(),
 		Origin:                     string(job.Origin()),
 		Enabled:                    job.Enabled(),
+		Description:                job.Description(),
 		ScheduleExpression:         job.Schedule().Expression(),
 		ScheduleOriginalExpression: job.Schedule().OriginalExpression(),
 		ScheduleDescription:        job.Schedule().Describe(),

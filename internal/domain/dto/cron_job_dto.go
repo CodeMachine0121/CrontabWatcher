@@ -13,6 +13,9 @@ type CronJobDto struct {
 	ScheduleOriginalExpression string `json:"scheduleOriginalExpression"`
 	ScheduleDescription        string `json:"scheduleDescription"`
 
+	// Description 是使用者為這個 job 寫的說明。只有納管的 job 會有。
+	Description string `json:"description"`
+
 	// Command 是實際會被執行的那道指令（managed job 已剝掉 wrapper）。
 	Command string `json:"command"`
 	// RawCommand 是 crontab 條目上的原文，供對照。

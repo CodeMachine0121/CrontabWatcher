@@ -1,0 +1,21 @@
+{{define "content"}}
+<section class="panel">
+    <div class="panel-header">
+        <h1>cronjobs</h1>
+        <span class="job-count">{{len .Jobs}} 筆</span>
+    </div>
+
+    {{if .WriteEnabled}}
+    <form class="create-form" id="create-form" onsubmit="return submitCreateForm(event)">
+        <input name="scheduleExpression" placeholder="0 3 * * *" aria-label="schedule" required>
+        <input name="command" placeholder="/usr/local/bin/backup.sh" aria-label="command" required>
+        <input name="description" placeholder="說明（選填）" aria-label="description">
+        <button type="submit">新增</button>
+    </form>
+    {{end}}
+
+    <div id="job-table" data-poll-url="/fragments/jobs" data-poll-interval="15000">
+        {{template "jobTable" .}}
+    </div>
+</section>
+{{end}}
