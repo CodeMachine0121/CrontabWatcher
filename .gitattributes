@@ -1,0 +1,4 @@
+# crontab fixture 的行尾字元本身就是測試對象。若讓 git 做行尾正規化，CRLF 的
+# 無損 round-trip 測試會在重新 clone 之後莫名失敗。
+internal/domain/entity/tests/testdata/*.txt -text
+internal/infrastructure/crontab/tests/testdata/*.txt -text
