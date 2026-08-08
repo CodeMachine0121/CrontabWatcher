@@ -258,6 +258,9 @@ cmd/cronwatch/
   run_command.go      — wrapper subcommand 的實作入口
 internal/domain/
   entity/             — CronJob、CronSchedule、CrontabDocument、JobRun
+                        + parse_crontab_line.go（無狀態純轉換；crontab 文字的
+                        解析是領域知識，不是 I/O 細節，故留在 domain）
+                        + domain_error.go（所有領域哨兵錯誤集中一處）
   vo/                 — CrontabLine、CommandRedirect
   dto/                — CronJobDto、JobRunDto
   service/            — CronJobService、JobRunService、CrontabEditService（一檔一 struct）
@@ -266,7 +269,6 @@ internal/application/ — 用例編排
 internal/controller/  — Gin handler + Request struct + ViewModel
 internal/infrastructure/
   crontab/            — CrontabDocumentRepository（讀寫 crontab 檔、原子寫入、備份）
-                        + parse_crontab_line.go（無狀態純轉換）
   runlog/             — JobRunRepository（runs.jsonl）、JobLogRepository（tail log 檔）
   shell/              — CommandExecutionProxy（os/exec）、CrondReloadProxy（呼叫 crontab 命令）
 internal/web/         — go:embed 的 templates/ 與 static/

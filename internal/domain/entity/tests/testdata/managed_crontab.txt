@@ -1,0 +1,6 @@
+# cronwatch:id=8f14e45f-ea8f-4b2c-9c3d-6a1b2c3d4e5f
+# cronwatch:strippedRedirect= >> /var/log/report.log 2>&1
+0 6 * * 1-5 /app/cronwatch run --job=8f14e45f-ea8f-4b2c-9c3d-6a1b2c3d4e5f -- /usr/local/bin/report.sh
+
+# a foreign job living next to a managed one
+0 7 * * * /usr/local/bin/sync.sh >> /var/log/sync.log

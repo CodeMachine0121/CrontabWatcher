@@ -1,0 +1,4 @@
+# windows line endings, no trailing newline
+
+0 3 * * * /bin/x >> /var/log/x.log
+30 4 * * * /bin/y

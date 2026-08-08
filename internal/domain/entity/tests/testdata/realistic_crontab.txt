@@ -1,0 +1,18 @@
+# Personal crontab for james
+# Do not edit while the backup is running
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+MAILTO=
+
+# nightly database backup
+0 3 * * * /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1
+
+# every quarter hour, output discarded on purpose
+*/15 * * * * /usr/local/bin/heartbeat.sh > /dev/null 2>&1
+
+# disabled while we investigate the disk usage
+#30 4 * * 0 /usr/local/bin/vacuum.sh >> /var/log/vacuum.log 2>&1
+
+@daily /usr/local/bin/rotate.sh
+@reboot /usr/local/bin/warmup.sh

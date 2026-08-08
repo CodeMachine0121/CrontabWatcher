@@ -111,6 +111,13 @@ func (run *JobRun) Duration() time.Duration
 func (run *JobRun) Succeeded() bool
 ```
 
+> **`parse_crontab_line.go` 放 `entity/`，不放 `infrastructure/crontab/`。** crontab 文字的
+> 解析是領域知識（哪一行是條目、什麼算合法排程），不是 I/O 細節；而且它需要
+> `CronSchedule` 做合法性判斷。infra 的 `crontab` package 只負責讀寫檔案。
+>
+> **哨兵錯誤集中在 `entity/domain_error.go`。** 放在最內層讓 service 直接回傳、
+> controller 直接以 `errors.Is` 對映狀態碼，不必每層重新宣告或包裝。
+
 ### 無損 render 的實作策略
 
 `CrontabDocument` 內部是 `[]vo.CrontabLine`，每行都保留 `RawText`。`Render()` 就是 `strings.Join(rawTexts, "\n")` 加上原檔尾端是否有換行的旗標。**任何修改操作只替換／插入／刪除特定的 `CrontabLine`，其餘元素的 `RawText` 原封不動。** 這讓無損性質成為結構上的保證，而不是靠小心維護。
