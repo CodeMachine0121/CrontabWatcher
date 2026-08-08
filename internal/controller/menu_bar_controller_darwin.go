@@ -102,6 +102,16 @@ func (controller *MenuBarController) onReady() {
 
 	controller.refreshNow()
 
+	// 把選單真正掛到狀態列項目上。
+	//
+	// **少了這一步，圖示會出現但點下去毫無反應。** 這個 systray fork 刻意沒有預設
+	// 掛上選單（它把 `[statusItem setMenu:menu]` 那行註解掉了），改成讓使用者自己
+	// 決定要選單還是要滑鼠事件回呼。我們要的就是一個正常的下拉選單，不需要滑鼠
+	// 事件，所以在這裡掛上去。
+	//
+	// 必須在全部項目都建好之後才呼叫：它只在選單尚未掛上時才動作。
+	systray.CreateMenu()
+
 	go controller.refreshPeriodically()
 }
 

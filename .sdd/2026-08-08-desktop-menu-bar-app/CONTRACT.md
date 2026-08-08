@@ -35,7 +35,7 @@
 | AC-23 | 輸出無處可讀時說明原因 | 顯示「無輸出可讀」與「轉為納管」建議 | 既有 `job_run_service.go:74`+ | 既有測試 | asserts-oracle | produces-oracle | ✅ |
 | AC-24 | 不重複手動觸發 | 拒絕並說明正在執行中 | 既有 `job_execution_service.go` | 既有測試 | asserts-oracle | produces-oracle | ✅ |
 | AC-25 | 外部改動時拒絕覆寫 | 中止並說明已被外部改動，手改未被覆蓋 | 既有 `crontab_command_repository.go` | 既有測試 | asserts-oracle | produces-oracle | ✅ |
-| AC-26 | 視窗已開時再次開啟 | 帶到最前，且不開第二個視窗 | `desktop_window_proxy.go:44`（重用）、`:158`（帶到最前） | `desktop_window_proxy_test.go:66` | asserts-oracle（僅「不開第二個」半邊） | 重用 produces-oracle；帶到最前 unclear | ❔ |
+| AC-26 | 視窗已開時再次開啟 | 帶到最前，且不開第二個視窗 | `desktop_window_proxy.go:42`（重用）、`window_command_darwin.go`（視窗自行提升為前景並到最前） | `desktop_window_proxy_test.go:66` | asserts-oracle（僅「不開第二個」半邊） | produces-oracle（打包切片改為由視窗程序自行活化，已實機驗證 policy=regular） | 🟡 |
 | AC-27 | 看到的是本機真正的排程 | 顯示 `crontab -l` 的那些排程 | `desktop_config.go:72` | `desktop_config_test.go:47` + 實機驗證 | asserts-oracle | produces-oracle | ✅ |
 | AC-28 | 與容器形態互不影響 | 只看本機那份，且不提供切換來源 | `desktop_config.go:72`（強制來源，無切換介面） | `desktop_config_test.go:47` | asserts-oracle | produces-oracle | ✅ |
 | AC-29 | 其他裝置連不進來 | 連線不成立 | `desktop_config.go:27`、`desktop_command.go:74` | `desktop_config_test.go:56` + 實機驗證（LAN IP 不可達） | asserts-oracle | produces-oracle | ✅ |
@@ -95,7 +95,12 @@ Conformance: 32/47 = 68% 完全符合；其餘 5 項為 shell／結構性條款�
 - **AC-22（🟠 → ✅）** — 補上 `desktop_routes_test.go`：桌面模式的能力是靠「完整視窗載入的就是同一個 router」成立的，這個測試把那個結構事實釘住，日後有人拿掉任一條路由會被擋下。
 - **NFR-1（❌ → ✅）** — 規格與實作的分歧，**往規格收斂**：PRD 條文改述為「選單列在任何情況下都不得因為讀取而卡住」，並在原處保留原始條文與改述理由。這是刻意的規格修訂，不是把測試改成配合程式。
 
+**稽核之後才發現的實際缺陷（記錄以免重犯）**
+
+- **選單根本打不開。** 稽核當時把 `DM-27（啟動桌面形態 → 進駐選單列，圖示與摘要與規則一致）` 記為「實機驗證通過」，但當時實際驗證的只是「程序活著、服務回應、圖示出現」——**沒有真的點開那個選單**。使用者一點才發現圖示是惰性的：`energye/systray` 刻意不預設把選單掛到狀態列項目上（`systray_darwin.m:78` 把 `[statusItem setMenu:menu]` 註解掉了），必須自己呼叫 `systray.CreateMenu()`。已修正。
+  **教訓**：shell 條款的「實機驗證」必須驗到使用者真正會做的那個動作為止；驗到「程序沒死」就記成通過，等於把最後一哩路留給使用者去發現。
+
 **仍未完全釘住的（誠實記錄，非缺陷）**
 
 - **AC-26（❔）** — 「不開第二個視窗」已由單元測試釘住並實機驗證；「帶到最前」為盡力而為（需 macOS 輔助使用權限，失敗即忽略），無法由讀程式判定，也未實機驗證。
-- **AC-13 / AC-31 / AC-32 / NFR-3（🟡）** — shell 或結構性條款。AC-13 的視窗機制已實機驗證（開啟、以 stdin 導覽、隨父程序收掉），但「點選單列某一筆」這個滑鼠動作本身未驗；AC-31／AC-32 是「本服務不含排程器」的結構事實，無法以測試斷言別的東西照跑；NFR-3 的不支援訊息只在非 macOS 平台編譯得到，已用 `GOOS=linux` 建置驗證其存在。
+- **AC-13 / AC-31 / AC-32 / NFR-3（🟡）** — shell 或結構性條款。AC-13 的視窗機制已實機驗證（開啟、以 stdin 導覽、隨父程序收掉），但「點選單列某一筆」這個滑鼠動作本身仍未由自動化驗證（需要輔助取用權限才能合成點擊），只能由使用者確認；AC-31／AC-32 是「本服務不含排程器」的結構事實，無法以測試斷言別的東西照跑；NFR-3 的不支援訊息只在非 macOS 平台編譯得到，已用 `GOOS=linux` 建置驗證其存在。
