@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -38,6 +39,11 @@ func runDesktopCommand() int {
 
 		return 1
 	}
+
+	// 從 Finder 啟動的 app 沒有終端機可看，stderr 等於掉進黑洞。留一份檔案，
+	// 否則「打開沒反應」這件事將完全無從查起。
+	closeLogFile := redirectLogToFile(configuration)
+	defer closeLogFile()
 
 	instanceLock, err := system.AcquireInstanceLock(configuration.DesktopLockFilePath)
 	if err != nil {
@@ -104,6 +110,38 @@ func runDesktopCommand() int {
 	menuBarController.Run()
 
 	return 0
+}
+
+// desktopLogFileMaxBytes 是紀錄檔的上限。超過就從頭開始寫——這份檔案只是為了
+// 回答「剛剛啟動時發生了什麼」，不需要留著半年前的內容。
+const desktopLogFileMaxBytes = 1 << 20
+
+// redirectLogToFile 讓紀錄同時寫進 stderr 與狀態目錄下的檔案。
+//
+// 兩邊都寫：從終端機啟動時仍然看得到，從 Finder 啟動時則有檔案可查。開不了檔案
+// 就維持只寫 stderr——為了記錄失敗而讓整個 app 起不來，是本末倒置。
+func redirectLogToFile(configuration ServerConfiguration) func() {
+	logFilePath := filepath.Join(filepath.Dir(configuration.DesktopLockFilePath), "desktop.log")
+
+	openFlags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if fileInfo, err := os.Stat(logFilePath); err == nil && fileInfo.Size() > desktopLogFileMaxBytes {
+		openFlags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	}
+
+	logFile, err := os.OpenFile(logFilePath, openFlags, 0o600)
+	if err != nil {
+		log.Printf("could not open %s, logging to stderr only: %v", logFilePath, err)
+
+		return func() {}
+	}
+
+	log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+	log.Printf("--- cronwatch desktop starting; this log lives in %s ---", logFilePath)
+
+	return func() {
+		log.SetOutput(os.Stderr)
+		_ = logFile.Close()
+	}
 }
 
 // prepareDesktopStateDirectories 先把要寫入的目錄建好。
