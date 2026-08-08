@@ -171,6 +171,60 @@ func (status *DesktopStatus) lessUrgent(leftLine vo.JobStatusLine, rightLine vo.
 	return leftLine.NextRunAt.Before(*rightLine.NextRunAt)
 }
 
+// SettledRunIDs 回傳「已結束」的最近一次執行的識別碼集合。
+//
+// 還在跑的紀錄刻意不算結算過：它之後結束成失敗時仍該被通知。未納管的 job 也不
+// 算，它們永遠不會是失敗候選。
+func (status *DesktopStatus) SettledRunIDs() map[string]bool {
+	settledRunIDs := map[string]bool{}
+
+	for _, job := range status.jobs {
+		latestRun := status.finishedManagedRunOf(job)
+		if latestRun != nil {
+			settledRunIDs[latestRun.RunID()] = true
+		}
+	}
+
+	return settledRunIDs
+}
+
+// FailureCandidates 回傳「最近一次是壞消息」的那些執行，尚未判斷是不是新出現的。
+func (status *DesktopStatus) FailureCandidates() []*FailureNotice {
+	candidates := make([]*FailureNotice, 0)
+
+	for _, job := range status.jobs {
+		latestRun := status.finishedManagedRunOf(job)
+		if latestRun == nil || status.outcomeOf(job) != LatestRunOutcomeFailed {
+			continue
+		}
+
+		failureKind := FailureKindFailed
+		if latestRun.RunStatus() == RunStatusTimedOut {
+			failureKind = FailureKindTimedOut
+		}
+
+		exitCode, exitCodeKnown := latestRun.ExitCode()
+		candidates = append(candidates, NewFailureNotice(
+			latestRun.RunID(), job.JobID(), job.DisplayName(), failureKind, exitCode, exitCodeKnown))
+	}
+
+	return candidates
+}
+
+// finishedManagedRunOf 取出這個 job 已結束的最近一次執行；不適用時回 nil。
+func (status *DesktopStatus) finishedManagedRunOf(job *CronJob) *JobRun {
+	if !job.IsManaged() {
+		return nil
+	}
+
+	latestRun, recorded := status.latestRuns[job.JobID()]
+	if !recorded || latestRun == nil || !latestRun.IsFinished() {
+		return nil
+	}
+
+	return latestRun
+}
+
 // outcomeOf 判定單一 job 的最近一次結果。
 func (status *DesktopStatus) outcomeOf(job *CronJob) LatestRunOutcome {
 	if !job.IsManaged() {
