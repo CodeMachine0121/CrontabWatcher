@@ -1,0 +1,35 @@
+services:
+  crontab-watcher:
+    build: .
+    image: crontab-watcher:local
+    container_name: crontab-watcher
+    restart: unless-stopped
+    ports:
+      # 只綁 loopback。本服務能執行任意指令，等同 remote shell —— 絕不綁 0.0.0.0。
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # crontab 檔 / log / runs.jsonl / 備份全在這一顆
+      - ./data:/data
+    environment:
+      TZ: Asia/Taipei
+      SERVER_ADDRESS: 0.0.0.0:8080
+      CRONTAB_WRITE_ENABLED: "true"
+      MANUAL_TRIGGER_ENABLED: "true"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ---------------------------------------------------------------------------
+# 唯讀模式（僅 Linux host 可用；macOS 的 Docker Desktop 跑在 Linux VM 內，
+# 看不到 /var/at/tabs/，無法用此模式）——把 host 的 crontab 掛進來只看不改：
+#
+#   volumes:
+#     - /var/spool/cron/crontabs/james:/data/crontabs/root:ro
+#     - /var/log:/hostlog:ro
+#   environment:
+#     CRONTAB_WRITE_ENABLED: "false"
+#     MANUAL_TRIGGER_ENABLED: "false"   # 容器環境 ≠ host 環境，結果不可信
+# ---------------------------------------------------------------------------
