@@ -15,7 +15,9 @@ const mainUsage = `usage: cronwatch <command>
 
 commands:
   serve                                    start the web server (default)
+  desktop                                  live in the macOS menu bar (macOS only)
   run --job=<jobId> -- <command...>        run a command and record the run
+  window --url=<address>                   open the standalone window (started by desktop)
 
 environment variables are documented in CLAUDE.md; all of them have defaults.`
 
@@ -32,8 +34,12 @@ func main() {
 	switch command {
 	case "serve":
 		os.Exit(runServeCommand())
+	case "desktop":
+		os.Exit(runDesktopCommand())
 	case "run":
 		os.Exit(runWrapperCommand(arguments[1:]))
+	case "window":
+		os.Exit(runWindowCommand(arguments[1:]))
 	case "-h", "--help", "help":
 		fmt.Println(mainUsage)
 		os.Exit(0)

@@ -1,4 +1,4 @@
-.PHONY: start start-host build test vet check docker-build docker-up docker-down docker-logs mocks
+.PHONY: start start-host start-desktop build test vet check docker-build docker-up docker-down docker-logs mocks
 
 BINARY := bin/cronwatch
 PACKAGE := ./cmd/cronwatch
@@ -52,6 +52,20 @@ start-host: build
 	RUN_RECORD_FILE_PATH="$(HOST_STATE_DIRECTORY)/runs.jsonl" \
 	CRONTAB_BACKUP_DIRECTORY="$(HOST_STATE_DIRECTORY)/backups" \
 	./$(BINARY) serve
+
+# start-desktop 進駐 macOS 選單列。看的是與 start-host 同一份東西 ——「你真正在用
+# 的那份 crontab」—— 差別只在怎麼呈現：不必開終端機、不必開瀏覽器分頁，出事時會
+# 主動通知。
+#
+# 服務綁在 loopback 的臨時埠上，只給這台機器上的視窗看；狀態與 start-host 共用
+# $(HOST_STATE_DIRECTORY)，兩種啟動方式因此看得到同一份執行歷史。
+#
+# 一樣先 build 而不是 go run：go run 的執行檔在暫存目錄，而那個路徑會被寫進
+# crontab，也會被用來開啟視窗子程序。
+#
+# 僅 macOS。其他平台會直接說明並退出。
+start-desktop: build
+	./$(BINARY) desktop
 
 build:
 	go build -o $(BINARY) $(PACKAGE)

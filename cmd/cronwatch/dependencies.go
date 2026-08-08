@@ -14,6 +14,7 @@ import (
 	interfaces "github.com/james-hsueh/crontab-watcher/internal/domain/interface"
 	"github.com/james-hsueh/crontab-watcher/internal/domain/service"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/crontab"
+	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/notification"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/runlog"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/shell"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/system"
@@ -26,6 +27,7 @@ type applicationSet struct {
 	jobRunApplication        *application.JobRunApplication
 	manualTriggerApplication *application.ManualTriggerApplication
 	crontabEditApplication   *application.CrontabEditApplication
+	desktopApplication       *application.DesktopApplication
 	jobRunRepository         *runlog.JobRunRepository
 }
 
@@ -60,6 +62,8 @@ func buildApplicationSet(configuration ServerConfiguration) applicationSet {
 	jobExecutionService := service.NewJobExecutionService(
 		crontabDocumentRepository, jobRunRepository, jobLogRepository,
 		commandExecutionProxy, identifierGenerator, clock, configuration.RunLogDirectory)
+	desktopStatusService := service.NewDesktopStatusService(
+		crontabDocumentRepository, jobRunRepository, configuration.DesktopSummaryLineLimit)
 	crontabEditService := service.NewCrontabEditService(
 		crontabDocumentRepository, identifierGenerator,
 		configuration.WrapperBinaryPath, configuration.RunLogDirectory)
@@ -71,6 +75,8 @@ func buildApplicationSet(configuration ServerConfiguration) applicationSet {
 			jobExecutionService, configuration.ManualTriggerEnabled, configuration.ManualTriggerTimeout),
 		crontabEditApplication: application.NewCrontabEditApplication(
 			crontabEditService, clock, configuration.CrontabWriteEnabled),
+		desktopApplication: application.NewDesktopApplication(
+			desktopStatusService, clock, notification.NewNotificationProxy("")),
 		jobRunRepository: jobRunRepository,
 	}
 }
