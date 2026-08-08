@@ -2,7 +2,14 @@
 {{if not .Jobs}}
 <p class="empty-state">
     這份 crontab 裡沒有任何排程條目。
-    <span class="muted">檔案：{{.CrontabFilePath}}</span>
+    <span class="muted">來源：<span class="mono">{{.CrontabSourceLabel}}</span></span>
+    {{if not .WatchingUserCrontab}}
+    <span class="muted">
+        目前是<strong>檔案模式</strong>，看的是上面那個路徑。如果那個檔案不存在，這裡就會是空的。
+        想看你自己真正在用的 crontab（<span class="mono">crontab -l</span> 列出的那些），
+        改用 <span class="mono">make start-host</span> 啟動。
+    </span>
+    {{end}}
 </p>
 {{else}}
 <table class="job-table">

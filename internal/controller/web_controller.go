@@ -21,9 +21,15 @@ const displayTimeLayout = "01/02 15:04:05"
 
 // pageViewModel 是 template 的資料形狀。它只服務 HTML 渲染，不外流到 API。
 type pageViewModel struct {
-	PageTitle       string
-	CrontabFilePath string
-	TimeZoneName    string
+	PageTitle string
+	// CrontabSourceLabel 是這份 crontab 的來源說明：檔案模式是路徑，命令模式是
+	// `crontab -l`。刻意不叫 CrontabFilePath —— 命令模式下它並不是一個路徑。
+	CrontabSourceLabel string
+	TimeZoneName       string
+
+	// WatchingUserCrontab 為 true 表示正在看使用者真正的 crontab（命令模式）。
+	// 空清單的說明文字需要它才能給出對的建議。
+	WatchingUserCrontab bool
 
 	WriteEnabled         bool
 	ManualTriggerEnabled bool
@@ -47,8 +53,9 @@ type WebController struct {
 
 	templates map[string]*template.Template
 
-	crontabFilePath      string
+	crontabSourceLabel   string
 	timeZoneName         string
+	watchingUserCrontab  bool
 	manualTriggerEnabled bool
 }
 
@@ -58,8 +65,9 @@ func NewWebController(
 	cronJobApplication *application.CronJobApplication,
 	jobRunApplication *application.JobRunApplication,
 	crontabEditApplication *application.CrontabEditApplication,
-	crontabFilePath string,
+	crontabSourceLabel string,
 	timeZoneName string,
+	watchingUserCrontab bool,
 	manualTriggerEnabled bool,
 ) (*WebController, error) {
 	templates, err := parseTemplates()
@@ -72,8 +80,9 @@ func NewWebController(
 		jobRunApplication:      jobRunApplication,
 		crontabEditApplication: crontabEditApplication,
 		templates:              templates,
-		crontabFilePath:        crontabFilePath,
+		crontabSourceLabel:     crontabSourceLabel,
 		timeZoneName:           timeZoneName,
+		watchingUserCrontab:    watchingUserCrontab,
 		manualTriggerEnabled:   manualTriggerEnabled,
 	}, nil
 }
@@ -233,8 +242,9 @@ func (controller *WebController) buildDetailViewModel(jobID string) (pageViewMod
 func (controller *WebController) newViewModel(pageTitle string) pageViewModel {
 	return pageViewModel{
 		PageTitle:            pageTitle,
-		CrontabFilePath:      controller.crontabFilePath,
+		CrontabSourceLabel:   controller.crontabSourceLabel,
 		TimeZoneName:         controller.timeZoneName,
+		WatchingUserCrontab:  controller.watchingUserCrontab,
 		WriteEnabled:         controller.crontabEditApplication.WriteEnabled(),
 		ManualTriggerEnabled: controller.manualTriggerEnabled,
 	}

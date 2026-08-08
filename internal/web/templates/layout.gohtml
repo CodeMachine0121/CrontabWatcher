@@ -10,7 +10,7 @@
 <header class="page-header">
     <a class="brand" href="/">crontab-watcher</a>
     <div class="header-meta">
-        <span class="crontab-path" title="crontab file being watched">{{.CrontabFilePath}}</span>
+        <span class="crontab-path" title="where this crontab is read from">{{.CrontabSourceLabel}}</span>
         <span class="timezone-badge" title="timezone used for next run times">{{.TimeZoneName}}</span>
         {{if not .WriteEnabled}}<span class="badge badge-readonly" title="CRONTAB_WRITE_ENABLED is false">read only</span>{{end}}
     </div>

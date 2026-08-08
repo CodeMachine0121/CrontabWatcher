@@ -90,6 +90,7 @@ func buildRouter(configuration ServerConfiguration, applications applicationSet)
 		applications.crontabEditApplication,
 		configuration.CrontabSourceDescription(),
 		configuration.Location.String(),
+		configuration.UsesUserCrontab(),
 		configuration.ManualTriggerEnabled,
 	)
 	if err != nil {

@@ -6,8 +6,27 @@ PACKAGE := ./cmd/cronwatch
 # start-host 的狀態存放位置：crontab 備份、執行紀錄、納管 job 的 log。
 HOST_STATE_DIRECTORY ?= $(HOME)/.local/state/crontab-watcher
 
-start:
-	go run $(PACKAGE) serve
+# start 用的沙箱位置（專案內，已在 .gitignore）。
+LOCAL_STATE_DIRECTORY ?= ./data
+
+# start 跑在一份**專案內的沙箱 crontab** 上，不碰你真正的 crontab。適合開發與試玩。
+#
+# 刻意不使用內建預設值：那些預設是容器裡的路徑（/data/...），在開發機上不存在，
+# 於是頁面會顯示一份空清單，看起來像壞了。指向 ./data 之後，看到的空清單就真的是
+# 一份空的沙箱 crontab —— 那是實話。
+#
+# 想看你自己真正在用的 crontab，用 `make start-host`。
+start: build
+	@mkdir -p "$(LOCAL_STATE_DIRECTORY)/crontabs" "$(LOCAL_STATE_DIRECTORY)/logs" "$(LOCAL_STATE_DIRECTORY)/backups"
+	@test -f "$(LOCAL_STATE_DIRECTORY)/crontabs/root" || \
+		printf '# sandbox crontab for local development — not your real crontab\n' \
+		> "$(LOCAL_STATE_DIRECTORY)/crontabs/root"
+	CRONTAB_FILE_PATH="$(LOCAL_STATE_DIRECTORY)/crontabs/root" \
+	WRAPPER_BINARY_PATH="$(CURDIR)/$(BINARY)" \
+	RUN_LOG_DIRECTORY="$(LOCAL_STATE_DIRECTORY)/logs" \
+	RUN_RECORD_FILE_PATH="$(LOCAL_STATE_DIRECTORY)/runs.jsonl" \
+	CRONTAB_BACKUP_DIRECTORY="$(LOCAL_STATE_DIRECTORY)/backups" \
+	./$(BINARY) serve
 
 # start-host 直接在這台機器上跑，看的是 `crontab -l` 列出的**你真正在用的那份
 # crontab**，而不是容器內自管的副本。
