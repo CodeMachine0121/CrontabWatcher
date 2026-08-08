@@ -7,3 +7,6 @@ packages:
   github.com/james-hsueh/crontab-watcher/internal/domain/interface:
     config:
       all: true
+resolve-type-alias: False
+disable-version-string: True
+issue-845-fix: True
