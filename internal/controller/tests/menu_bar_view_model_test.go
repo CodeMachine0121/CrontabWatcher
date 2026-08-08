@@ -89,19 +89,21 @@ func TestMenuBarViewModelGivesEachOutcomeItsOwnSymbol(t *testing.T) {
 
 func TestMenuBarViewModelSaysWhenThereIsNoNextRun(t *testing.T) {
 	testCases := []struct {
-		name         string
-		line         dto.JobStatusLineDto
-		expectedText string
+		name          string
+		line          dto.JobStatusLineDto
+		expectedTexts []string
 	}{
 		{
-			name:         "a disabled job",
-			line:         dto.JobStatusLineDto{DisplayName: "x", Enabled: false, Outcome: "unknown"},
-			expectedText: "已停用",
+			name: "a disabled job",
+			line: dto.JobStatusLineDto{DisplayName: "x", Enabled: false, Outcome: "unknown"},
+			// 兩件事都要說：它被停用了（狀態），而且沒有下次執行（那一欄的值）。
+			// 只說「已停用」會讓下次執行欄看起來像還沒算出來。
+			expectedTexts: []string{"已停用", "不適用"},
 		},
 		{
-			name:         "a job with no predictable next run",
-			line:         dto.JobStatusLineDto{DisplayName: "x", Enabled: true, Outcome: "unknown"},
-			expectedText: "不適用",
+			name:          "a job with no predictable next run",
+			line:          dto.JobStatusLineDto{DisplayName: "x", Enabled: true, Outcome: "unknown"},
+			expectedTexts: []string{"不適用"},
 		},
 	}
 
@@ -111,7 +113,9 @@ func TestMenuBarViewModelSaysWhenThereIsNoNextRun(t *testing.T) {
 				statusWithLines(entity.StatusIndicatorNormal, testCase.line))
 
 			require.Len(t, viewModel.LineTitles, 1)
-			assert.Contains(t, viewModel.LineTitles[0], testCase.expectedText)
+			for _, expectedText := range testCase.expectedTexts {
+				assert.Contains(t, viewModel.LineTitles[0], expectedText)
+			}
 		})
 	}
 }

@@ -118,12 +118,16 @@ func emptyMessageOf(status dto.DesktopStatusDto) string {
 }
 
 // buildLineTitle 組出一行的文字：結果符號、名稱、排程、下次執行。
+//
+// 已停用是掛在**名稱**上的狀態，不是下次執行欄的值 —— 把「已停用」寫進那一欄，
+// 就沒有人說得出那一欄到底是什麼，看起來會像「還沒算出來」。兩件事各說各的。
 func buildLineTitle(line dto.JobStatusLineDto) string {
-	parts := []string{
-		outcomeSymbolOf(line.Outcome) + " " + line.DisplayName,
-		line.ScheduleDescription,
-		nextRunTextOf(line),
+	name := outcomeSymbolOf(line.Outcome) + " " + line.DisplayName
+	if !line.Enabled {
+		name += "（已停用）"
 	}
+
+	parts := []string{name, line.ScheduleDescription, nextRunTextOf(line)}
 
 	return strings.Join(parts, " · ")
 }
@@ -143,13 +147,9 @@ func outcomeSymbolOf(outcome string) string {
 
 // nextRunTextOf 說明下次什麼時候跑。
 //
-// 已停用與「不會再跑」是兩個不同的原因，分開講；沒有下次執行時說「不適用」而
-// 不是留白 —— 留白會被讀成「還沒算出來」。
+// 沒有下次執行時說「不適用」而不是留白 —— 留白會被讀成「還沒算出來」。已停用的
+// 條目也走這條路：它同樣沒有下次執行，而「為什麼」已經寫在名稱旁邊了。
 func nextRunTextOf(line dto.JobStatusLineDto) string {
-	if !line.Enabled {
-		return "已停用"
-	}
-
 	if line.NextRunAt == nil {
 		return "不適用"
 	}
