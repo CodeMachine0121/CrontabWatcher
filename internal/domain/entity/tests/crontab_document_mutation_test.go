@@ -331,3 +331,18 @@ func TestCrontabDocumentMutationsKeepUnrelatedBytesIdentical(t *testing.T) {
 	assert.Equal(t, originalContent, document.Render(),
 		"after a full create/edit/disable/enable/delete round trip the file must be back to the original bytes")
 }
+
+func TestCrontabDocumentForeignIdentifierIsStableAcrossDisabling(t *testing.T) {
+	// CrontabEditService 依賴這個性質：停用之後仍然用同一個識別碼找回該筆 job。
+	// 摘要算的是剝掉開頭 # 之後的排程與指令，而停用只動那個 #。
+	document := ParseCrontabDocument("0 3 * * * /bin/x >> /var/log/x.log\n")
+	originalJobID := document.Jobs()[0].JobID()
+
+	require.NoError(t, document.SetJobEnabled(originalJobID, false))
+
+	assert.Equal(t, originalJobID, document.Jobs()[0].JobID())
+	assert.False(t, document.Jobs()[0].Enabled())
+
+	require.NoError(t, document.SetJobEnabled(originalJobID, true))
+	assert.Equal(t, originalJobID, document.Jobs()[0].JobID())
+}
