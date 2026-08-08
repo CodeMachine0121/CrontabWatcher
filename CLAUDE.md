@@ -30,6 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    | **唯讀模式** | Linux host 上把 host 的 crontab 掛進容器（`CRONTAB_WRITE_ENABLED=false`） | ❌ 回 403 | ⚠️ 容器內環境 ≠ host 環境，預設關閉 |
    | **host 模式**（`make start-host`） | 不用容器，直接在機器上跑，看 `crontab -l` 列出的**使用者真正那份 crontab**（`CRONTAB_SOURCE=crontabCommand`） | ✅ 經由 `crontab <file>` | ✅ 環境就是 host 環境，結果可信 |
    | **桌面模式**（`make start-desktop`，僅 macOS） | host 模式的另一種**呈現方式**：進駐選單列，不必開終端機也不必開瀏覽器分頁；資料來源與 host 模式完全相同 | ✅ 同 host 模式 | ✅ 同 host 模式 |
+   | **App 模式**（`make dmg` → 拖進「應用程式」，僅 macOS） | 桌面模式的**交付方式**，行為完全相同。**長期使用請用這個**：`/Applications/CrontabWatcher.app/Contents/MacOS/cronwatch` 是唯一不會因為重新編譯或清掉 `bin/` 而消失的執行檔路徑，而納管排程的條目指的就是它 | ✅ | ✅ |
 
    **macOS host 無法用唯讀模式**——Docker Desktop 跑在 Linux VM 內，掛不到 `/var/at/tabs/`、也叫不到 host 的 `crontab` 命令。在 Mac 上想看自己真正的 crontab，用 **host 模式**（`make start-host`）。
 
@@ -55,6 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 5. `crontab-writing` — CRUD 寫回 crontab（原子寫入 + 備份 + `crontab <file>` 驗證 + crond reload）、job 啟用／停用、foreign → managed 轉換
 6. `host-crontab-access` — 走 `crontab -l` / `crontab <file>` 存取使用者真正那份 crontab（host 模式）
 7. `desktop-menu-bar-app` — macOS 選單列常駐應用：狀態指示、摘要、失敗通知、獨立視窗（僅呈現方式，不引入新資料來源）
+8. `macos-app-packaging` — 包成 `.app` 與 DMG，拖進「應用程式」即安裝（僅交付方式，不引入新行為）
 
 ## Tech Stack
 
@@ -191,6 +193,7 @@ Go modules 管理依賴；`Makefile` 為主要入口。
 - `make test`（`go test ./...`）— 跑全部單元測試
 - `make vet`（`go vet ./...`）— 靜態檢查
 - `make check`（build + vet + test）— **commit 前跑這個**
+- `make app` / `make dmg`（`./scripts/package-macos-app.sh`）— 包成 `.app` 與 DMG，產物在 `dist/`（已 gitignore）。版本號可覆寫：`make dmg VERSION=0.2.0`
 - `make docker-build` / `make docker-up` / `make docker-logs` — 容器建置與啟動
 - 執行單一測試：`go test ./internal/path/to/... -run TestName`
 - 重新產生 mock：`mockery`（讀取 `.mockery.yaml`，需先安裝 `mockery` CLI）
@@ -201,10 +204,12 @@ Go modules 管理依賴；`Makefile` 為主要入口。
 
 | 指令 | 用途 |
 |:---|:---|
-| `cronwatch serve` | 啟動 web server（預設） |
+| `cronwatch serve` | 啟動 web server。**從終端機執行時的預設**；被包成 `.app` 時預設改為 `desktop`（見下） |
 | `cronwatch desktop` | 進駐 macOS 選單列（僅 macOS）。強制 `CRONTAB_SOURCE=crontabCommand`、綁 `127.0.0.1:0`（臨時埠，其他裝置連不進來）、狀態預設放 `$HOME/.local/state/crontab-watcher/`（與 `start-host` 共用）。以檔案鎖保證單一實例 |
 | `cronwatch window --url=<address>` | 獨立視窗的子程序，由 `desktop` 啟動，通常不自己跑。**必須是獨立程序**：systray 與 webview 都要佔用 macOS 主 run loop。父程序以它的 stdin 送後續網址（一行一個），stdin 關閉即收掉視窗 |
 | `cronwatch run --job=<jobId> -- <command...>` | wrapper：執行指令、記錄 `JobRun` 到 `runs.jsonl`、輸出寫入該 job 的 log 檔，並以子程序的 exit code 作為自己的 exit code（讓 cron 的錯誤語意不失真） |
+
+**沒有給子命令時要跑哪一個**，由執行檔自己的位置決定：路徑含 `.app/Contents/MacOS/` → `desktop`（雙擊一個 app 卻起了一個沒有畫面的 server，等於「什麼都沒發生」）；否則 → `serve`，既有行為不變。Finder 有時塞的 `-psn_…` 參數不是子命令，一律略過。見 `cmd/cronwatch/resolve_command.go`。
 
 managed job 的 crontab 條目長這樣：
 
@@ -303,7 +308,18 @@ internal/infrastructure/
   notification/       — NotificationProxy（osascript，文字一律走 argv）
   desktop/            — DesktopWindowProxy（獨立視窗的子程序管理）
 internal/web/         — go:embed 的 templates/ 與 static/
+scripts/
+  package-macos-app.sh — 打包成 .app 與 DMG（圖示、Info.plist、ad-hoc 簽章、hdiutil）
+tools/
+  appicon/            — 純 Go 畫出 app 圖示的 iconset（不放二進位圖檔進 repo）
+dist/                 — 打包產物，gitignore
 ```
+
+**App 打包的三個不可商量的點**（細節見 `.sdd/2026-08-08-macos-app-packaging/PRD.md`）：
+
+1. **App 名稱不含空白** —— 它的執行檔路徑會被寫進 crontab 條目，而 crontab 以空白分欄。建置腳本會擋。
+2. **`LSUIElement=true`，但視窗子程序在執行時自行提升為前景程式** —— 一個 bundle 裡兩種活法：選單列不佔 Dock 圖示，視窗仍可聚焦、可打字、開啟時自動到最前。這也取代了原本用 `osascript` 帶視窗到最前的做法（那需要輔助使用權限）。
+3. **從 Finder 啟動不繼承 shell 環境** —— 沒有 `.env`、只有最小 `PATH`。手動觸發的指令因此更接近 cron 自己的環境，依賴 `/opt/homebrew/bin` 之類路徑的指令要寫完整路徑。紀錄寫在 `$HOME/.local/state/crontab-watcher/desktop.log`，因為 stderr 在 Finder 啟動時無處可看。
 
 **目前沒有 `internal/shared/`，也沒有各層 `README.md`**（如需要請自行補上，不要假設已存在）。
 
