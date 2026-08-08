@@ -12,6 +12,8 @@
 | `CronJob` | 一筆排程條目 | `NextRunAt(from)`、`ResolveLogFilePath(managedDir)`、`IsManaged()`、`LogSource()` |
 | `CronSchedule` | cron 表達式（含 alias 展開） | `NextRunAt(from)`、`IsPredictable()`、`Expression()`、`Describe()` |
 | `JobRun` | 一次執行的紀錄 | `Duration()`、`IsFinished()`、`Succeeded()` |
+| `DesktopStatus` | 桌面形態的整體狀態：由全部 `CronJob` 的最近一次執行歸納出「現在有沒有事要理」 | `Indicator()`、`AttentionJobIDs()` |
+| `FailureNoticeLedger` | 記住「哪些執行已經通知過」，據此判斷哪幾筆是**新出現**的失敗，避免重複通知 | `Reconcile(runs)`、`SeenRunIDs()` |
 
 ## 值物件（vo · `internal/domain/vo/`）
 
@@ -29,6 +31,9 @@
 | `LogSource` | `managed`（本服務指定的 log 檔）／`redirect`（從指令 redirect 解析出）／`none`（無 log 可讀） | `none` |
 | `TriggerSource` | `schedule`（cron 觸發）／`manual`（瀏覽器觸發） | `schedule` |
 | `RunStatus` | `running`／`succeeded`（exit code 0）／`failed`（非 0）／`timedOut`／`unknown`（foreign job 無法判定） | `unknown` |
+| `StatusIndicator` | `normal`（一切正常）／`attention`（有納管 job 最近一次失敗或逾時）／`unavailable`（讀不到 crontab） | `normal` |
+| `LatestRunOutcome` | `succeeded`／`failed`（含逾時）／`running`／`unknown`（foreign job 無從得知） | `unknown` |
+| `FailureKind` | `failed`（非 0 結束）／`timedOut`（跑太久被中止） | `failed` |
 
 ## 動作（use case 語彙）
 
@@ -42,6 +47,9 @@
 | 啟用／停用 | `EnableCronJob`／`DisableCronJob` | 取消註解／註解掉該條目，**不刪除** |
 | 轉為 managed | `AdoptCronJob` | 補 marker、把指令包成 wrapper、剝離原 redirect |
 | 記錄執行 | `RecordJobRun` | wrapper 落地一筆 `JobRun` |
+| 歸納桌面狀態 | `SummarizeDesktopStatus` | 讀 crontab 與執行紀錄，歸納出 `DesktopStatus`（整體指示 + 每個 job 的摘要） |
+| 挑出新的失敗 | `DetectFailureNotices` | 比對 `FailureNoticeLedger`，回傳本次**新出現**且需要通知的失敗執行 |
+| 發出通知 | `NotifyJobFailure` | 對使用者發一則系統通知（`INotificationProxy`） |
 
 ## 關鍵約定
 
@@ -63,3 +71,16 @@
 | execution／history（當型別名） | `JobRun` | 一次執行就叫 run，與 crontab 生態一致 |
 | delete（指停用） | disable | 停用是註解掉、可還原；delete 是真的移除該行 |
 | DB／record（指持久化層） | 檔案系統／`runs.jsonl` | 本專案無資料庫 |
+| tray／systray（當領域詞） | 選單列（menu bar）／`DesktopStatus` | tray 是平台外殼的實作細節，領域層只認識「整體狀態」 |
+| alert／warning（指通知） | `FailureNotice`／通知 | 只有失敗會通知，不存在分級告警 |
+
+## 業務語彙 ↔ 識別字對照（中文文件用）
+
+| 業務文件寫 | 程式碼用 |
+|:---|:---|
+| 排程（一筆條目） | `CronJob` |
+| 排程表 | `CrontabDocument` |
+| 納管／未納管 | `JobOrigin` 的 `managed`／`foreign` |
+| 一次執行 | `JobRun` |
+| 有事要理／正常／無法取得 | `StatusIndicator` 的 `attention`／`normal`／`unavailable` |
+| 無從得知 | `LatestRunOutcome` 的 `unknown` |
