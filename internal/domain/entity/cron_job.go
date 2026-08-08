@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/james-hsueh/crontab-watcher/internal/domain/vo"
 )
@@ -217,6 +218,27 @@ func (job *CronJob) ResolveLogFilePath(managedLogDirectory string) string {
 	default:
 		return ""
 	}
+}
+
+// displayNameMaxRunes 是摘要清單一行放得下的名稱長度。超過就截斷 —— 一個把整
+// 列擠爆的指令，讀起來反而比截斷後更難認出是哪一個 job。
+const displayNameMaxRunes = 40
+
+// DisplayName 回答「這個 job 該叫什麼名字」。
+//
+// 說明是使用者自己為它取的名字，最能辨識；沒有說明時指令本身就是它的身分，並
+// 且用剝掉 wrapper 與 redirect 之後的那道指令 —— 那才是使用者心裡的那件事。
+func (job *CronJob) DisplayName() string {
+	if description := strings.TrimSpace(job.description); description != "" {
+		return description
+	}
+
+	command := strings.TrimSpace(job.InnerCommand())
+	if utf8.RuneCountInString(command) <= displayNameMaxRunes {
+		return command
+	}
+
+	return string([]rune(command)[:displayNameMaxRunes]) + "…"
 }
 
 // NextRunAt 算出下次執行時刻。已停用的 job 一律回報無下次執行 —— 它不會跑，
