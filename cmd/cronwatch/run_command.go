@@ -9,7 +9,6 @@ import (
 	"github.com/james-hsueh/crontab-watcher/internal/application"
 	"github.com/james-hsueh/crontab-watcher/internal/domain/dto"
 	"github.com/james-hsueh/crontab-watcher/internal/domain/service"
-	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/crontab"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/runlog"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/shell"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/system"
@@ -42,7 +41,7 @@ func runWrapperCommand(arguments []string) int {
 	jobExecutionService := service.NewJobExecutionService(
 		// wrapper 不讀 crontab —— 指令由 argv 帶入。這裡仍然注入 repository 是為了
 		// 滿足建構子，但這條路徑不會用到它。
-		crontab.NewCrontabDocumentRepository(configuration.CrontabFilePath, configuration.CrontabBackupDirectory),
+		buildCrontabDocumentRepository(configuration),
 		runlog.NewJobRunRepository(configuration.RunRecordFilePath, configuration.RunRecordRetentionCount),
 		runlog.NewJobLogRepository(),
 		shell.NewCommandExecutionProxy(configuration.ShellPath),

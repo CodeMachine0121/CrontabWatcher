@@ -17,6 +17,7 @@ const (
 	defaultRunRecordFilePath       = "/data/runs.jsonl"
 	defaultCrontabBackupDirectory  = "/data/backups"
 	defaultShellPath               = "/bin/sh"
+	defaultCrontabCommandPath      = "crontab"
 	defaultTimeZoneName            = "Asia/Taipei"
 	defaultLogTailLines            = 200
 	defaultRunRecordRetentionCount = 500
@@ -28,9 +29,24 @@ const (
 	minimumManualTriggerTimeout = time.Second
 )
 
+// CrontabSource 決定 crontab 從哪裡讀寫。
+type CrontabSource string
+
+const (
+	// CrontabSourceFile 直接讀寫 CRONTAB_FILE_PATH。容器自管模式用這個。
+	CrontabSourceFile CrontabSource = "file"
+	// CrontabSourceCommand 走 `crontab -l` 與 `crontab <file>`。host 模式**必須**用
+	// 這個：spool 目錄是 drwx------ root:wheel，直接讀會 permission denied，而
+	// crontab 是 setuid，是唯一不需要 root 的途徑。
+	CrontabSourceCommand CrontabSource = "crontabCommand"
+)
+
 // ServerConfiguration 是啟動時一次讀完的組態。
 type ServerConfiguration struct {
 	ServerAddress string
+
+	CrontabSource      CrontabSource
+	CrontabCommandPath string
 
 	CrontabFilePath        string
 	RunLogDirectory        string
@@ -86,6 +102,9 @@ func loadServerConfiguration() ServerConfiguration {
 		manualTriggerTimeout = minimumManualTriggerTimeout
 	}
 
+	crontabSource, warning := loadCrontabSource()
+	warnings = appendWarning(warnings, warning)
+
 	location, warning := loadLocationFromEnvironment()
 	warnings = appendWarning(warnings, warning)
 
@@ -94,6 +113,8 @@ func loadServerConfiguration() ServerConfiguration {
 
 	return ServerConfiguration{
 		ServerAddress:           stringWithDefault("SERVER_ADDRESS", defaultServerAddress),
+		CrontabSource:           crontabSource,
+		CrontabCommandPath:      stringWithDefault("CRONTAB_COMMAND_PATH", defaultCrontabCommandPath),
 		CrontabFilePath:         stringWithDefault("CRONTAB_FILE_PATH", defaultCrontabFilePath),
 		RunLogDirectory:         stringWithDefault("RUN_LOG_DIRECTORY", defaultRunLogDirectory),
 		RunRecordFilePath:       stringWithDefault("RUN_RECORD_FILE_PATH", defaultRunRecordFilePath),
@@ -108,6 +129,37 @@ func loadServerConfiguration() ServerConfiguration {
 		Location:                location,
 		Warnings:                warnings,
 	}
+}
+
+// loadCrontabSource 決定用哪一種 crontab 存取方式。
+//
+// 無法辨識的值退回 file 並警告：那是容器部署的形態，也是不會擅自去動使用者真正的
+// crontab 的那一個。
+func loadCrontabSource() (CrontabSource, string) {
+	value := stringWithDefault("CRONTAB_SOURCE", string(CrontabSourceFile))
+
+	switch CrontabSource(value) {
+	case CrontabSourceFile, CrontabSourceCommand:
+		return CrontabSource(value), ""
+	default:
+		return CrontabSourceFile, fmt.Sprintf(
+			"CRONTAB_SOURCE %q is not recognised, using %q; valid values are %q and %q",
+			value, CrontabSourceFile, CrontabSourceFile, CrontabSourceCommand)
+	}
+}
+
+// CrontabSourceDescription 說明這份 crontab 是從哪裡來的，供 UI 顯示。
+func (configuration ServerConfiguration) CrontabSourceDescription() string {
+	if configuration.CrontabSource == CrontabSourceCommand {
+		return configuration.CrontabCommandPath + " -l"
+	}
+
+	return configuration.CrontabFilePath
+}
+
+// UsesUserCrontab 回報這個部署是否直接操作使用者真正的 crontab。
+func (configuration ServerConfiguration) UsesUserCrontab() bool {
+	return configuration.CrontabSource == CrontabSourceCommand
 }
 
 func stringWithDefault(variableName string, defaultValue string) string {

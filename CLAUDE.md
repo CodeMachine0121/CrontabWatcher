@@ -28,8 +28,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    |:---|:---|:---|:---|
    | **自管模式**（Docker 主推） | crontab 檔與 log 目錄掛在 volume 上，容器內同時是排程器（busybox `crond`）與執行環境 | ✅ | ✅ 結果可信 |
    | **唯讀模式** | Linux host 上把 host 的 crontab 掛進容器（`CRONTAB_WRITE_ENABLED=false`） | ❌ 回 403 | ⚠️ 容器內環境 ≠ host 環境，預設關閉 |
+   | **host 模式**（`make start-host`） | 不用容器，直接在機器上跑，看 `crontab -l` 列出的**使用者真正那份 crontab**（`CRONTAB_SOURCE=crontabCommand`） | ✅ 經由 `crontab <file>` | ✅ 環境就是 host 環境，結果可信 |
 
-   **macOS host 無法用唯讀模式**——Docker Desktop 跑在 Linux VM 內，掛不到 `/var/at/tabs/`、也叫不到 host 的 `crontab` 命令。在 Mac 上只能用自管模式。
+   **macOS host 無法用唯讀模式**——Docker Desktop 跑在 Linux VM 內，掛不到 `/var/at/tabs/`、也叫不到 host 的 `crontab` 命令。在 Mac 上想看自己真正的 crontab，用 **host 模式**（`make start-host`）。
+
+   **為什麼 host 模式必須走 crontab 命令**：spool 目錄的權限是 `drwx------ root:wheel`，直接讀檔必然 permission denied。`crontab` 是 setuid 執行檔，因此**它是唯一不需要 root 就能存取使用者 crontab 的途徑**。替代方案是用 `sudo` 跑一個能執行任意指令的 web 服務，不值得。故 `ICrontabDocumentRepository` 有兩個實作（`CrontabDocumentRepository` 讀檔／`CrontabCommandRepository` 走命令），domain 與 service 完全不知道差別。
 
 此專案採 **Spec-Driven Development (SDD)**。動工前務必先讀以下權威文件：
 
@@ -207,7 +210,9 @@ managed job 的 crontab 條目長這樣：
 | 變數 | 預設值 | 用途 |
 |:---|:---|:---|
 | `SERVER_ADDRESS` | `127.0.0.1:8080` | 監聽位址。**預設只綁 loopback**——本服務可執行任意指令，等同 remote shell。容器內需設 `0.0.0.0:8080` 並靠 compose 的 port binding 限制在 `127.0.0.1` |
-| `CRONTAB_FILE_PATH` | `/data/crontabs/root` | crontab 檔案路徑（job 的真實來源）。自管模式指向 volume；唯讀模式指向掛進來的 host crontab |
+| `CRONTAB_SOURCE` | `file` | `file`＝直接讀寫 `CRONTAB_FILE_PATH`（容器自管模式）；`crontabCommand`＝走 `crontab -l` / `crontab <file>`（**host 模式必須用這個**，見下方說明）。無法辨識的值退回 `file` 並警告 |
+| `CRONTAB_COMMAND_PATH` | `crontab` | `crontab` 執行檔位置，僅 `CRONTAB_SOURCE=crontabCommand` 時使用 |
+| `CRONTAB_FILE_PATH` | `/data/crontabs/root` | crontab 檔案路徑，僅 `CRONTAB_SOURCE=file` 時用於讀寫（命令模式下只出現在 UI 的來源標示） |
 | `RUN_LOG_DIRECTORY` | `/data/logs` | managed job 的 log 檔存放目錄（`<jobId>.log`） |
 | `RUN_RECORD_FILE_PATH` | `/data/runs.jsonl` | 執行紀錄（append-only JSON Lines） |
 | `CRONTAB_BACKUP_DIRECTORY` | `/data/backups` | 每次寫入 crontab 前的備份目錄 |
@@ -274,6 +279,7 @@ internal/application/ — 用例編排
 internal/controller/  — Gin handler + Request struct + ViewModel
 internal/infrastructure/
   crontab/            — CrontabDocumentRepository（讀寫 crontab 檔、原子寫入、備份）
+                        + CrontabCommandRepository（走 crontab -l / crontab <file>，host 模式用）
   runlog/             — JobRunRepository（runs.jsonl）、JobLogRepository（tail log 檔）
   shell/              — CommandExecutionProxy（os/exec 執行指令、逾時、process group 清理）
   system/             — IdentifierGenerator（uuid）、Clock

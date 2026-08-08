@@ -154,3 +154,36 @@ func joinWarnings(warnings []string) string {
 
 	return combined
 }
+
+func TestLoadServerConfigurationDefaultsToTheFileCrontabSource(t *testing.T) {
+	configuration := loadServerConfiguration()
+
+	assert.Equal(t, CrontabSourceFile, configuration.CrontabSource,
+		"the default is the container mode, the one that does not touch a real user crontab")
+	assert.Equal(t, defaultCrontabCommandPath, configuration.CrontabCommandPath)
+	assert.False(t, configuration.UsesUserCrontab())
+	assert.Equal(t, defaultCrontabFilePath, configuration.CrontabSourceDescription())
+}
+
+func TestLoadServerConfigurationReadsTheCommandCrontabSource(t *testing.T) {
+	t.Setenv("CRONTAB_SOURCE", "crontabCommand")
+	t.Setenv("CRONTAB_COMMAND_PATH", "/usr/bin/crontab")
+
+	configuration := loadServerConfiguration()
+
+	assert.Equal(t, CrontabSourceCommand, configuration.CrontabSource)
+	assert.True(t, configuration.UsesUserCrontab())
+	assert.Equal(t, "/usr/bin/crontab -l", configuration.CrontabSourceDescription(),
+		"the UI has to say where the crontab actually came from")
+}
+
+func TestLoadServerConfigurationFallsBackOnAnUnrecognisedCrontabSource(t *testing.T) {
+	// 退回 file 而不是 command：那是不會擅自去動使用者真正 crontab 的那一個。
+	t.Setenv("CRONTAB_SOURCE", "hostt")
+
+	configuration := loadServerConfiguration()
+
+	assert.Equal(t, CrontabSourceFile, configuration.CrontabSource)
+	assert.Contains(t, joinWarnings(configuration.Warnings), "CRONTAB_SOURCE")
+	assert.Contains(t, joinWarnings(configuration.Warnings), "hostt")
+}

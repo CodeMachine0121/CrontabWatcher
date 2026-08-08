@@ -59,7 +59,15 @@ func runServeCommand() int {
 		return 1
 	}
 
-	log.Printf("watching %s", configuration.CrontabFilePath)
+	log.Printf("watching %s", configuration.CrontabSourceDescription())
+	if configuration.UsesUserCrontab() && configuration.CrontabWriteEnabled {
+		// 這條路徑會用 `crontab <file>` 整份取代使用者真正的 crontab。說清楚，並
+		// 指出備份在哪，以及怎麼關掉寫入。
+		log.Printf("WRITES GO TO YOUR REAL CRONTAB: edits replace it via %s <file>. "+
+			"Backups of every previous version are kept in %s. "+
+			"Set CRONTAB_WRITE_ENABLED=false to browse without writing.",
+			configuration.CrontabCommandPath, configuration.CrontabBackupDirectory)
+	}
 	log.Printf("run records in %s, managed logs in %s",
 		configuration.RunRecordFilePath, configuration.RunLogDirectory)
 	log.Printf("crontab writing %s, manual triggering %s",

@@ -11,6 +11,7 @@ import (
 
 	"github.com/james-hsueh/crontab-watcher/internal/application"
 	"github.com/james-hsueh/crontab-watcher/internal/controller"
+	interfaces "github.com/james-hsueh/crontab-watcher/internal/domain/interface"
 	"github.com/james-hsueh/crontab-watcher/internal/domain/service"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/crontab"
 	"github.com/james-hsueh/crontab-watcher/internal/infrastructure/runlog"
@@ -28,10 +29,23 @@ type applicationSet struct {
 	jobRunRepository         *runlog.JobRunRepository
 }
 
+// buildCrontabDocumentRepository 依組態挑一個 crontab 存取實作。
+//
+// 這是整個介面設計的回報：service 與 domain 完全不知道 crontab 是從檔案來的還是從
+// crontab 命令來的。
+func buildCrontabDocumentRepository(configuration ServerConfiguration) interfaces.ICrontabDocumentRepository {
+	if configuration.CrontabSource == CrontabSourceCommand {
+		return crontab.NewCrontabCommandRepository(
+			configuration.CrontabCommandPath, configuration.CrontabBackupDirectory)
+	}
+
+	return crontab.NewCrontabDocumentRepository(
+		configuration.CrontabFilePath, configuration.CrontabBackupDirectory)
+}
+
 // buildApplicationSet 由組態組出全部依賴。
 func buildApplicationSet(configuration ServerConfiguration) applicationSet {
-	crontabDocumentRepository := crontab.NewCrontabDocumentRepository(
-		configuration.CrontabFilePath, configuration.CrontabBackupDirectory)
+	crontabDocumentRepository := buildCrontabDocumentRepository(configuration)
 	jobRunRepository := runlog.NewJobRunRepository(
 		configuration.RunRecordFilePath, configuration.RunRecordRetentionCount)
 	jobLogRepository := runlog.NewJobLogRepository()
@@ -74,7 +88,7 @@ func buildRouter(configuration ServerConfiguration, applications applicationSet)
 		applications.cronJobApplication,
 		applications.jobRunApplication,
 		applications.crontabEditApplication,
-		configuration.CrontabFilePath,
+		configuration.CrontabSourceDescription(),
 		configuration.Location.String(),
 		configuration.ManualTriggerEnabled,
 	)
